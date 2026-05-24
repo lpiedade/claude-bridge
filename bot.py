@@ -48,7 +48,7 @@ ALLOWED_CWD_ROOTS = [
     ).split(",")
     if p.strip()
 ]
-CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/opt/homebrew/bin/claude")
+CLAUDE_BIN = "/opt/homebrew/bin/claude"
 PERMISSION_MODE = os.environ.get("CLAUDE_BRIDGE_PERMISSION_MODE", "bypassPermissions")
 TIMEOUT_SECONDS = int(os.environ.get("CLAUDE_BRIDGE_TIMEOUT", "600"))
 
@@ -224,11 +224,10 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         info = await session_for(update.effective_chat.id)
         await update.message.reply_text(
             "Claude bridge online.\n"
-            f"Session: `{info['session_id']}`\n"
-            f"CWD: `{info['cwd']}`\n"
-            f"Permission mode: `{PERMISSION_MODE}`\n\n"
+            f"Session: {info['session_id']}\n"
+            f"CWD: {info['cwd']}\n"
+            f"Permission mode: {PERMISSION_MODE}\n\n"
             "Commands: /new /cd /pwd /ls /status",
-            parse_mode="Markdown",
         )
     finally:
         await set_last_update_id(update.update_id)
@@ -241,9 +240,7 @@ async def cmd_new(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     try:
         info = await reset_session(update.effective_chat.id)
-        await update.message.reply_text(
-            f"New session: `{info['session_id']}`", parse_mode="Markdown"
-        )
+        await update.message.reply_text(f"New session: {info['session_id']}")
     finally:
         await set_last_update_id(update.update_id)
 
@@ -273,9 +270,7 @@ async def cmd_cd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         info = await session_for(chat_id)
         if not ctx.args:
-            await update.message.reply_text(
-                f"CWD: `{info['cwd']}`", parse_mode="Markdown"
-            )
+            await update.message.reply_text(f"CWD: {info['cwd']}")
             return
         new_cwd = _resolve_arg(ctx.args[0], info["cwd"])
         if not Path(new_cwd).is_dir():
@@ -295,9 +290,7 @@ async def cmd_cd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
         info = await update_session(chat_id, cwd=new_cwd)
-        await update.message.reply_text(
-            f"CWD: `{info['cwd']}`", parse_mode="Markdown"
-        )
+        await update.message.reply_text(f"CWD: {info['cwd']}")
     finally:
         await set_last_update_id(update.update_id)
 

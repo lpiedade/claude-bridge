@@ -100,7 +100,6 @@ cat ~/.claude-bridge/state.json          # per-chat session state
 | `CLAUDE_BRIDGE_ALLOWED_CHATS` | (required) | Comma-separated numeric `chat_id`s |
 | `CLAUDE_BRIDGE_CWD` | `~/EDF/Personal/Github` | Default working directory for new sessions |
 | `CLAUDE_BRIDGE_CWD_ROOTS` | `~/EDF/Personal/Github,~/EDF/BlindBet,/tmp` | Allowlist of roots `/cd` may switch into (comma-separated). `DEFAULT_CWD` must be under one of these or the bot refuses to start. Symlinks are resolved before the check. |
-| `CLAUDE_BIN` | `/opt/homebrew/bin/claude` | Path to the Claude CLI |
 | `CLAUDE_BRIDGE_PERMISSION_MODE` | `bypassPermissions` | See "Security" below |
 | `CLAUDE_BRIDGE_TIMEOUT` | `600` | Per-message timeout in seconds |
 

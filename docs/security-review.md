@@ -232,3 +232,68 @@ Re-run this review when any of the following change:
 - The set of bot commands (`/start`, `/new`, `/cd`, …) or their argument shape.
 - The state schema in `state.json`.
 - Number of allowed chats (single-user → multi-user widens several findings).
+
+---
+
+# Review #2 — 2026-05-24 (post-remediation pass)
+
+**Scope:** working-tree state of `bot.py`, `run.sh`, `.env.example`, `README.md` after walking F-01 through F-11 with the author and applying agreed remediations. Not yet committed at the time of this review. Same threat model and out-of-scope list as Review #1.
+
+**Method:** for each finding in Review #1, classify status as `Fixed`, `Accepted (operational)`, or `Open`; re-read the modified code to confirm the fix matches what was claimed and to surface any new observations introduced by the changes. The `Severity` column carries forward Review #1 unless explicitly downgraded.
+
+## Status of Review #1 findings
+
+| ID | Severity | Status | Where verified |
+|---|---|---|---|
+| F-01 | Critical | Accepted (operational) | `PERMISSION_MODE` default at `bot.py:52` unchanged. Mitigation = Telegram 2FA enabled by the user. |
+| F-02 | High | Fixed | `is_cwd_allowed()` + `_resolve_arg()` at `bot.py:68-101`; gate in `cmd_cd` and `cmd_ls`; startup fail-fast if `DEFAULT_CWD` outside roots. Blocked attempts logged with `chat_id`, requested path, resolved path, and roots. |
+| F-03 | High | Fixed | `bot.py:56-65`: `mkdir(mode=0o700)` + idempotent `os.chmod(STATE_FILE.parent, 0o700)` on every startup; startup auto-tightens existing `state.json` to `0o600` with a `WARNING` log. `save_state` chmods 0600 on every write. |
+| F-04 | High | Fixed | `save_state` writes to `.json.tmp`, chmods to 0600 before rename, then `os.replace` (atomic on macOS APFS). `load_state` catches `JSONDecodeError`, renames the broken file to `state.json.corrupt` for forensics, and returns empty state. |
+| F-05 | High | Fixed | Module-level `_state_lock = asyncio.Lock()`; `session_for`, `update_session`, `reset_session` are async and wrap read-modify-write in the lock; return a shallow copy so callers cannot mutate shared state. All 7 call sites use `await`. |
+| F-06 | Medium | Fixed | `state["_meta"]["last_processed_update_id"]` cursor; `_claim_update()` early-return on replayed updates; `try/finally` ensures `set_last_update_id()` runs even when a handler early-returns on validation failures. Applied to all 6 handlers (`cmd_status` inherits via delegation to `cmd_start`). |
+| F-07 | Medium | Accepted (with addendum) | See addendum on F-07 above. Rate limiter not implemented; relying on `concurrent_updates=False` serialization + Telegram 2FA. |
+| F-08 | Medium | Fixed | `_redact()` with five patterns (`$HOME`, `/Users/<user>`, email, hex blob ≥32, `sk-…`); chat receives only `rc` + redacted last line + pointer to `launchd.err`; full untruncated stderr (up to 5KB) logged via `log.error`. |
+| F-09 | Medium | Fixed | `run.sh` rejects start unless `stat -f '%Su:%A' .env` equals `$(whoami):600`. Error message includes the exact fix command. |
+| F-10 | Low | Fixed (by removal) | `CLAUDE_BIN` is now a hard-coded constant at `bot.py:51`; the env override and corresponding `.env.example`/README entry were removed. Closes the configuration-driven path-hijack vector entirely rather than validating it. |
+| F-11 | Low | Fixed | All four `parse_mode="Markdown"` sites removed; all backticks around interpolated UUIDs/paths removed. Plain-text replies are robust to `_`/`*`/backtick in user-controlled values. |
+| F-12 | Low | Open | `bot.py:380` still logs `chat=… session=… started=…` in plaintext. Will be addressed in the next walkthrough step. |
+| F-13 | Informational | Open | No prompt length cap in `on_message`. Defense-in-depth only — Telegram caps at 4096. |
+| F-14 | Informational | Open | Plist still runs without `SoftResourceLimits` or `sandbox-exec`. Acceptable for single-user personal tool. |
+
+## New observations introduced by the remediation
+
+The remediation added three commands (`/pwd`, `/ls`) and POSIX-style relative-path resolution in `/cd`. Each was inspected for new attack surface:
+
+- **`/pwd`** is read-only and only reveals the session's `cwd`. The `cwd` is already constrained to the allowlist (F-02 fix) and the operator already knows it, so no new info disclosure.
+
+- **`/ls`** lists directory entries inside the allowlist. Goes through `is_cwd_allowed()` with the same logging on blocked attempts. Caps output at 80 entries (`LS_MAX_ENTRIES`) to bound message size. Uses `Path.iterdir()` (no subprocess, no shell) and `PermissionError` is caught. **No new finding.**
+
+- **POSIX `cd` semantics** (`_resolve_arg`) — relative paths are joined with the session's `cwd`, then `os.path.normpath` collapses `..` and `.` **before** the allowlist check runs. Verified: `/cd ../../.ssh` from inside `~/EDF/Personal/Github/claude-bridge` resolves to `~/.ssh`, is rejected by the allowlist, and is logged. Symlink escape is still blocked by `resolve(strict=True)` in `is_cwd_allowed`. **No new finding.**
+
+- **`state["_meta"]` key namespace** — added by F-06 to hold the update-id cursor. Chat IDs are integers serialized to strings, never equal to `"_meta"`. Existing iteration code (none currently iterates the top-level dict beyond keyed access) is safe today but a future audit (e.g. weekly review) should filter out `_meta` if it ever iterates the chat map. **Minor — recorded for future re-review.**
+
+- **`os.chmod` calls at import time** (`bot.py:56-65`) run before `logging.basicConfig` in `main()`. The `log.warning` for legacy state-file permissions therefore uses the root logger's default handler — output still reaches `launchd.err` (it is stderr), but without the configured timestamp format. Cosmetic only; acceptable.
+
+- **Behavior change visible to operator:** the bot now refuses to start if `DEFAULT_CWD` is outside `ALLOWED_CWD_ROOTS` (SystemExit), and `run.sh` refuses to start if `.env` is not `600`. Both are intentional fail-fasts; both are documented in the README. No silent failure modes were introduced.
+
+## Residual risk summary
+
+The dominant residual risk after this pass is **F-01 (`bypassPermissions`)**, which remains in code; the entire mitigation is Telegram-side 2FA. If the Telegram account is compromised, every other fix in this review is bypassed in seconds. The trust anchor is now explicit and singular.
+
+Secondary residuals:
+
+- **F-07 (rate limit)** — accepted; bot is responsive to flooding only insofar as `concurrent_updates=False` serialization holds. Flipping to true async invocation would re-open the original framing.
+- **F-12 (log plaintext)** — minor local info disclosure if home directory is read by another UID.
+- **F-13, F-14** — informational; no action planned this pass.
+
+## Quick-win checklist (delta from Review #1)
+
+After this pass, Review #1's "fix F-01 first" recommendation is unchanged in code — only the operational layer (2FA) was added. The next high-leverage fix is **F-12** (~5 lines), which is what the operator chose to walk next.
+
+## Re-review trigger (additive to Review #1)
+
+In addition to the original triggers, re-review when:
+- The `_meta` schema in `state.json` grows additional keys (e.g. rate-limit buckets, audit logs) — confirm key namespace stays disjoint from `chat_id` strings.
+- The `_redact` pattern list changes (verify no over-redaction breaks legitimate output).
+- The `ALLOWED_CWD_ROOTS` default expands beyond the current three roots.
+- `concurrent_updates` is set to `True` in the `Application` builder — re-open F-05 and F-07.
