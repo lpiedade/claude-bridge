@@ -11,6 +11,7 @@ Commands:
     /cd      - show or set working directory: `/cd ~/EDF/BlindBet`
     /pwd     - print current working directory
     /ls      - list entries in cwd (or in an allowed path): `/ls ~/EDF/BlindBet`
+    /effort  - show or set effort level: `/effort high` (low|medium|high|xhigh|max|none)
 """
 from __future__ import annotations
 
@@ -51,6 +52,18 @@ ALLOWED_CWD_ROOTS = [
 CLAUDE_BIN = "/opt/homebrew/bin/claude"
 PERMISSION_MODE = os.environ.get("CLAUDE_BRIDGE_PERMISSION_MODE", "bypassPermissions")
 TIMEOUT_SECONDS = int(os.environ.get("CLAUDE_BRIDGE_TIMEOUT", "600"))
+
+VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+
+
+def _parse_effort(value: str | None) -> str | None:
+    if not value:
+        return None
+    v = value.strip().lower()
+    return v if v in VALID_EFFORTS else None
+
+
+DEFAULT_EFFORT = _parse_effort(os.environ.get("CLAUDE_BRIDGE_EFFORT"))
 
 STATE_FILE = Path.home() / ".claude-bridge" / "state.json"
 STATE_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -155,6 +168,7 @@ def _new_session_entry() -> dict:
     return {
         "session_id": str(uuid.uuid4()),
         "cwd": DEFAULT_CWD,
+        "effort": DEFAULT_EFFORT,
         "started": False,
     }
 
@@ -226,8 +240,9 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             "Claude bridge online.\n"
             f"Session: {info['session_id']}\n"
             f"CWD: {info['cwd']}\n"
-            f"Permission mode: {PERMISSION_MODE}\n\n"
-            "Commands: /new /cd /pwd /ls /status",
+            f"Permission mode: {PERMISSION_MODE}\n"
+            f"Effort: {info.get('effort') or '(default)'}\n\n"
+            "Commands: /new /cd /pwd /ls /effort /status",
         )
     finally:
         await set_last_update_id(update.update_id)
@@ -348,6 +363,37 @@ async def cmd_ls(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await set_last_update_id(update.update_id)
 
 
+async def cmd_effort(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if not authorized(update):
+        return
+    if not await _claim_update(update):
+        return
+    try:
+        chat_id = update.effective_chat.id
+        info = await session_for(chat_id)
+        if not ctx.args:
+            await update.message.reply_text(
+                f"Effort: {info.get('effort') or '(default)'}\n"
+                "Usage: /effort <low|medium|high|xhigh|max|none>"
+            )
+            return
+        arg = ctx.args[0].strip().lower()
+        if arg == "none":
+            await update_session(chat_id, effort=None)
+            await update.message.reply_text("Effort cleared (CLI default).")
+            return
+        if arg not in VALID_EFFORTS:
+            await update.message.reply_text(
+                f"Invalid effort: {arg}. "
+                f"Choose: {', '.join(sorted(VALID_EFFORTS))}, none"
+            )
+            return
+        info = await update_session(chat_id, effort=arg)
+        await update.message.reply_text(f"Effort: {info['effort']}")
+    finally:
+        await set_last_update_id(update.update_id)
+
+
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
         await update.message.reply_text("Unauthorized.")
@@ -365,6 +411,9 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
         cmd = [CLAUDE_BIN, "-p", prompt, "--permission-mode", PERMISSION_MODE,
                "--output-format", "json"]
+        effort = info.get("effort") or DEFAULT_EFFORT
+        if effort:
+            cmd += ["--effort", effort]
         if info.get("started"):
             cmd += ["--resume", info["session_id"]]
         else:
@@ -428,6 +477,7 @@ def main() -> None:
     app.add_handler(CommandHandler("cd", cmd_cd))
     app.add_handler(CommandHandler("pwd", cmd_pwd))
     app.add_handler(CommandHandler("ls", cmd_ls))
+    app.add_handler(CommandHandler("effort", cmd_effort))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     log.info("Bridge online. Allowed chats: %s", ALLOWED_CHAT_IDS)
     app.run_polling()

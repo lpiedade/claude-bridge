@@ -58,6 +58,8 @@ tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
 | `/pwd` | Print the current working directory |
 | `/ls` | List entries in the current cwd |
 | `/ls ~/EDF/BlindBet` | List entries in a path (must be inside an allowed root) |
+| `/effort` | Show the effort level for this chat (or `(default)` if unset) |
+| `/effort high` | Set effort for this chat. Valid: `low`, `medium`, `high`, `xhigh`, `max`, `none` (clears override) |
 | `<any text>` | Send as a prompt to Claude Code |
 
 ## Management (launchd)
@@ -102,6 +104,7 @@ cat ~/.claude-bridge/state.json          # per-chat session state
 | `CLAUDE_BRIDGE_CWD_ROOTS` | `~/EDF/Personal/Github,~/EDF/BlindBet,/tmp` | Allowlist of roots `/cd` may switch into (comma-separated). `DEFAULT_CWD` must be under one of these or the bot refuses to start. Symlinks are resolved before the check. |
 | `CLAUDE_BRIDGE_PERMISSION_MODE` | `bypassPermissions` | See "Security" below |
 | `CLAUDE_BRIDGE_TIMEOUT` | `600` | Per-message timeout in seconds |
+| `CLAUDE_BRIDGE_EFFORT` | (unset) | Default effort level passed as `--effort` to the Claude CLI. One of `low`, `medium`, `high`, `xhigh`, `max`. Per-chat override via `/effort`. |
 
 After editing `.env`, reload with `launchctl kickstart -k gui/$UID/com.local.claude-bridge`.
 
