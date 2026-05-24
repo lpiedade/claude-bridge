@@ -1,6 +1,6 @@
 # claude-bridge
 
-Telegram ↔ Claude Code CLI bridge running on the Mac. Lets you talk to the Accenture Claude Code subscription from your phone without installing Claude on mobile.
+Telegram ↔ Claude Code CLI bridge running on the Mac. Lets you talk to the Claude Code subscription from your phone without installing Claude on mobile.
 
 ## Architecture
 
@@ -124,5 +124,5 @@ After editing `.env`, reload with `launchctl kickstart -k gui/$UID/com.local.cla
 ## Stack
 
 - `python-telegram-bot>=21.0` (long-polling)
-- `claude` CLI (Accenture subscription, authenticated on the Mac)
+- `claude` CLI (authenticated on the Mac)
 - launchd (not cron — recovers from sleep, auto-restart on crash)
