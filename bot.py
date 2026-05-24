@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -76,6 +77,22 @@ def _resolve_arg(arg: str, base_cwd: str) -> str:
     if os.path.isabs(arg):
         return os.path.normpath(arg)
     return os.path.normpath(os.path.join(base_cwd, arg))
+
+
+_HOME = str(Path.home())
+_REDACT_PATTERNS = [
+    (re.compile(re.escape(_HOME)), "~"),
+    (re.compile(r"/Users/[^/\s]+"), "/Users/<user>"),
+    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "<email>"),
+    (re.compile(r"\b[0-9a-f]{32,}\b"), "<hex>"),
+    (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "<api-key>"),
+]
+
+
+def _redact(s: str) -> str:
+    for pat, repl in _REDACT_PATTERNS:
+        s = pat.sub(repl, s)
+    return s
 
 
 def _safe_resolve(path: str) -> str:
@@ -376,9 +393,17 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         if result.returncode != 0:
-            err = (result.stderr or result.stdout or "").strip()
+            err_full = (result.stderr or result.stdout or "").strip()
+            log.error(
+                "claude rc=%s chat=%s stderr=%s",
+                result.returncode, chat_id, err_full[:5000],
+            )
+            err_safe = _redact(err_full)
+            last_line = err_safe.splitlines()[-1] if err_safe else "(no stderr)"
             await update.message.reply_text(
-                f"Error (rc={result.returncode}):\n{err[:3500]}"
+                f"Claude exited with rc={result.returncode}.\n"
+                f"Last line: {last_line[:500]}\n"
+                f"Full stderr in launchd.err"
             )
             return
 

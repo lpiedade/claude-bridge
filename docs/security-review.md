@@ -127,6 +127,18 @@ def save_state(state: dict) -> None:
 
 **Remediation:** Add a sliding-window rate limiter per `chat_id` (e.g. 30 messages/hour, 5/minute). Reject excess with a single "rate limited" message — do not silently drop, since that masks the abuse signal.
 
+**Addendum — 2026-05-24 re-read with concurrency model in mind:**
+
+The original framing ("hundreds of simultaneous subprocesses") is incorrect for the current configuration. `python-telegram-bot` v21 defaults to `concurrent_updates=False`, so the `Application` processes updates one at a time. On top of that, `on_message` calls `subprocess.run(...)` synchronously inside an async handler, which blocks the event loop until Claude returns — effectively serializing message handling even if `concurrent_updates=True` were set later. So a burst of 100 messages does not spawn 100 parallel processes; it produces a long queue handled sequentially.
+
+This changes the threat model but does not eliminate the finding:
+
+- **Quota burn is still real.** A serialized burst still drains the Accenture subscription one prompt at a time, just slower.
+- **Bot becomes unresponsive during the burst.** Without a rate limit, every command (including `/new`) sits behind the queue; the only escape is stopping the bot via `launchctl`. With a rate limit, excess messages are rejected in ~1ms and admin commands stay reachable.
+- **F-01's compromise vector (Telegram account takeover) still benefits from a cap** — attacker cannot indefinitely tie up the bot's quota and attention.
+
+Severity remains `Medium`; the original remediation (sliding-window rate limiter) still applies. Decision recorded after discussion on 2026-05-24: not implemented for now — relying on `concurrent_updates=False` serialization plus Telegram 2FA (F-01 operational mitigation). Reopen this finding if `concurrent_updates` is ever flipped to `True`, if the bot moves to async Claude invocations (e.g. via `asyncio.create_subprocess_exec`), or if a second authorized chat is added.
+
 ### F-08 — Subprocess error output is reflected to Telegram (and to Telegram cloud backups)  &nbsp;`Severity: Medium`
 
 **Location:** `bot.py:173-176`
