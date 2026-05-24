@@ -53,8 +53,11 @@ tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
 | `/start` | Show current session_id, cwd, and permission mode |
 | `/status` | Alias for `/start` |
 | `/new` | Generate a new session_id (clears conversation memory) |
-| `/cwd` | Show the current working directory |
-| `/cwd ~/EDF/BlindBet` | Change the working directory |
+| `/cd` | Show the current working directory |
+| `/cd ~/EDF/BlindBet` | Change the working directory |
+| `/pwd` | Print the current working directory |
+| `/ls` | List entries in the current cwd |
+| `/ls ~/EDF/BlindBet` | List entries in a path (must be inside an allowed root) |
 | `<any text>` | Send as a prompt to Claude Code |
 
 ## Management (launchd)
@@ -96,6 +99,7 @@ cat ~/.claude-bridge/state.json          # per-chat session state
 | `CLAUDE_BRIDGE_TG_TOKEN` | (required) | Token from BotFather |
 | `CLAUDE_BRIDGE_ALLOWED_CHATS` | (required) | Comma-separated numeric `chat_id`s |
 | `CLAUDE_BRIDGE_CWD` | `~/EDF/Personal/Github` | Default working directory for new sessions |
+| `CLAUDE_BRIDGE_CWD_ROOTS` | `~/EDF/Personal/Github,~/EDF/BlindBet,/tmp` | Allowlist of roots `/cd` may switch into (comma-separated). `DEFAULT_CWD` must be under one of these or the bot refuses to start. Symlinks are resolved before the check. |
 | `CLAUDE_BIN` | `/opt/homebrew/bin/claude` | Path to the Claude CLI |
 | `CLAUDE_BRIDGE_PERMISSION_MODE` | `bypassPermissions` | See "Security" below |
 | `CLAUDE_BRIDGE_TIMEOUT` | `600` | Per-message timeout in seconds |

@@ -43,7 +43,7 @@ cmd = [CLAUDE_BIN, "-p", prompt, "--permission-mode", PERMISSION_MODE, ...]
 3. **High cost:** run the bot under a dedicated UNIX user with no sudo, no SSH keys, and a sandboxed home; expose only the project directory via mount/ACL. Defeats most blast-radius scenarios at the cost of setup complexity.
 4. **Operational:** enable Telegram two-step verification (passcode in addition to SMS) and audit linked devices monthly. This is the cheapest practical control against the dominant attack vector.
 
-### F-02 — `/cwd` accepts any directory the user can read  &nbsp;`Severity: High`
+### F-02 — `/cd` accepts any directory the user can read  &nbsp;`Severity: High`
 
 **Location:** `bot.py:128-132`
 **Evidence:**
@@ -54,7 +54,7 @@ if not Path(new_cwd).is_dir():
     return
 ```
 
-**Description:** The only validation is `is_dir()`. `/cwd /`, `/cwd ~/.ssh`, `/cwd ~/Library/Group Containers`, `/cwd ~/EDF/BlindBet` are all accepted. Combined with F-01, this lets any Telegram-side attacker move into the most sensitive directories on the machine before issuing a destructive prompt. Symlinks are not resolved, so `/cwd /tmp/symlink-to-anywhere` is also accepted.
+**Description:** The only validation is `is_dir()`. `/cd /`, `/cd ~/.ssh`, `/cd ~/Library/Group Containers`, `/cd ~/EDF/BlindBet` are all accepted. Combined with F-01, this lets any Telegram-side attacker move into the most sensitive directories on the machine before issuing a destructive prompt. Symlinks are not resolved, so `/cd /tmp/symlink-to-anywhere` is also accepted.
 
 **Impact:** Amplifier for F-01. Removing it does not fix the underlying problem but raises the cost of casual mistakes (a typo turning into a wipe of `~/Library`).
 
@@ -217,6 +217,6 @@ After F-01, the highest leverage-per-line-of-code fixes are:
 
 Re-run this review when any of the following change:
 - `PERMISSION_MODE` default in `bot.py`.
-- The set of bot commands (`/start`, `/new`, `/cwd`, …) or their argument shape.
+- The set of bot commands (`/start`, `/new`, `/cd`, …) or their argument shape.
 - The state schema in `state.json`.
 - Number of allowed chats (single-user → multi-user widens several findings).
