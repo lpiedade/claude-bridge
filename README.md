@@ -1,0 +1,128 @@
+# claude-bridge
+
+Telegram ↔ Claude Code CLI bridge running on the Mac. Lets you talk to the Accenture Claude Code subscription from your phone without installing Claude on mobile.
+
+## Architecture
+
+```
+[Telegram app on phone]
+        ↓
+[Telegram Bot API]
+        ↓ (long-poll)
+[bot.py running on the Mac via launchd]
+        ↓ (subprocess)
+[claude -p <prompt> --resume <session-id> --permission-mode bypassPermissions]
+```
+
+Per-chat state persisted in `~/.claude-bridge/state.json` (session_id + cwd + `started` flag).
+
+## Initial setup
+
+### 1. Create the Telegram bot
+- In Telegram, talk to `@BotFather` → `/newbot` → follow the prompts → save the **token**.
+- Talk to `@userinfobot` → save your numeric **chat_id**.
+
+### 2. Install local dependencies
+```bash
+cd ~/EDF/Personal/Github/claude-bridge
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env
+# edit .env: fill in CLAUDE_BRIDGE_TG_TOKEN and CLAUDE_BRIDGE_ALLOWED_CHATS
+chmod 600 .env
+```
+
+### 3. Foreground smoke test
+```bash
+./run.sh
+# in another window: send /start to the bot in Telegram
+# ctrl-c once it works
+```
+
+### 4. Enable as a service (launchd)
+```bash
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.local.claude-bridge.plist
+launchctl print gui/$UID/com.local.claude-bridge | head -30
+tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
+```
+
+## Bot commands (in Telegram)
+
+| Command | Function |
+|---|---|
+| `/start` | Show current session_id, cwd, and permission mode |
+| `/status` | Alias for `/start` |
+| `/new` | Generate a new session_id (clears conversation memory) |
+| `/cwd` | Show the current working directory |
+| `/cwd ~/EDF/BlindBet` | Change the working directory |
+| `<any text>` | Send as a prompt to Claude Code |
+
+## Management (launchd)
+
+```bash
+# Inspect state (loaded? last exit? PID?)
+launchctl print gui/$UID/com.local.claude-bridge
+
+# Restart after editing bot.py or .env
+launchctl kickstart -k gui/$UID/com.local.claude-bridge
+
+# Stop temporarily (keeps plist on disk)
+launchctl bootout gui/$UID ~/Library/LaunchAgents/com.local.claude-bridge.plist
+
+# Reload after editing the plist
+launchctl bootout gui/$UID ~/Library/LaunchAgents/com.local.claude-bridge.plist
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.local.claude-bridge.plist
+
+# Remove permanently
+launchctl bootout gui/$UID ~/Library/LaunchAgents/com.local.claude-bridge.plist
+rm ~/Library/LaunchAgents/com.local.claude-bridge.plist
+
+# Validate plist syntax before reloading
+plutil -lint ~/Library/LaunchAgents/com.local.claude-bridge.plist
+```
+
+## Logs
+
+```bash
+tail -50 ~/.claude-bridge/launchd.out    # stdout (bot INFO logs)
+tail -50 ~/.claude-bridge/launchd.err    # stderr (errors, tracebacks)
+cat ~/.claude-bridge/state.json          # per-chat session state
+```
+
+## Configuration (.env)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `CLAUDE_BRIDGE_TG_TOKEN` | (required) | Token from BotFather |
+| `CLAUDE_BRIDGE_ALLOWED_CHATS` | (required) | Comma-separated numeric `chat_id`s |
+| `CLAUDE_BRIDGE_CWD` | `~/EDF/Personal/Github` | Default working directory for new sessions |
+| `CLAUDE_BIN` | `/opt/homebrew/bin/claude` | Path to the Claude CLI |
+| `CLAUDE_BRIDGE_PERMISSION_MODE` | `bypassPermissions` | See "Security" below |
+| `CLAUDE_BRIDGE_TIMEOUT` | `600` | Per-message timeout in seconds |
+
+After editing `.env`, reload with `launchctl kickstart -k gui/$UID/com.local.claude-bridge`.
+
+## Security
+
+- **Chat allowlist** — only chats in `CLAUDE_BRIDGE_ALLOWED_CHATS` get replies; everyone else sees "Unauthorized".
+- **`bypassPermissions`** — required to run tasks without human approval. Equivalent to "yes to everything": Claude can edit/delete files inside `cwd` and run arbitrary shell commands. Mitigations:
+  - Keep `cwd` in a safe directory (not `$HOME` root).
+  - Switch to `acceptEdits` in `.env` to block shell command execution (file edits only).
+- **Token and chat_id in `.env`** — chmod 600. Never commit to git.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Bot does not reply on Telegram | Service is not running | `launchctl print gui/$UID/com.local.claude-bridge` — if "could not find service", reload |
+| `last exit code` ≠ 0 | Error in `bot.py` or missing `.env` | `tail -50 ~/.claude-bridge/launchd.err` |
+| "Unauthorized" reply on Telegram | Your chat_id is not in `ALLOWED_CHATS` | Re-fetch via `@userinfobot`, update `.env`, kickstart |
+| `claude: command not found` in logs | Plist `PATH` does not include `/opt/homebrew/bin` | Check the `EnvironmentVariables` block in the plist |
+| Reply is cut off | Message >4000 chars | Expected — the bot splits into chunks; confirm all arrived |
+| Session "forgot" context | Mac slept or bot restarted | State persists in `~/.claude-bridge/state.json`; `--resume` continues working after restart |
+
+## Stack
+
+- `python-telegram-bot>=21.0` (long-polling)
+- `claude` CLI (Accenture subscription, authenticated on the Mac)
+- launchd (not cron — recovers from sleep, auto-restart on crash)
