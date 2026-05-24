@@ -14,6 +14,7 @@ Commands:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -109,42 +110,88 @@ if not is_cwd_allowed(DEFAULT_CWD):
 
 
 def load_state() -> dict:
-    if STATE_FILE.exists():
+    if not STATE_FILE.exists():
+        return {}
+    try:
         return json.loads(STATE_FILE.read_text())
-    return {}
+    except json.JSONDecodeError as e:
+        backup = STATE_FILE.with_suffix(".json.corrupt")
+        log.error(
+            "state.json is corrupt (%s); moved to %s and starting empty",
+            e, backup,
+        )
+        STATE_FILE.rename(backup)
+        return {}
 
 
 def save_state(state: dict) -> None:
-    STATE_FILE.write_text(json.dumps(state, indent=2))
-    os.chmod(STATE_FILE, 0o600)
+    tmp = STATE_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state, indent=2))
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, STATE_FILE)
 
 
-def session_for(chat_id: int) -> dict:
-    state = load_state()
-    key = str(chat_id)
-    if key not in state:
-        state[key] = {
-            "session_id": str(uuid.uuid4()),
-            "cwd": DEFAULT_CWD,
-            "started": False,
-        }
+_state_lock = asyncio.Lock()
+
+
+def _new_session_entry() -> dict:
+    return {
+        "session_id": str(uuid.uuid4()),
+        "cwd": DEFAULT_CWD,
+        "started": False,
+    }
+
+
+async def session_for(chat_id: int) -> dict:
+    async with _state_lock:
+        state = load_state()
+        key = str(chat_id)
+        if key not in state:
+            state[key] = _new_session_entry()
+            save_state(state)
+        return dict(state[key])
+
+
+async def update_session(chat_id: int, **changes) -> dict:
+    async with _state_lock:
+        state = load_state()
+        key = str(chat_id)
+        if key not in state:
+            state[key] = _new_session_entry()
+        state[key].update(changes)
         save_state(state)
-    return state[key]
+        return dict(state[key])
 
 
-def update_session(chat_id: int, **changes) -> dict:
-    state = load_state()
-    key = str(chat_id)
-    state.setdefault(key, session_for(chat_id))
-    state[key].update(changes)
-    save_state(state)
-    return state[key]
-
-
-def reset_session(chat_id: int) -> dict:
-    return update_session(
+async def reset_session(chat_id: int) -> dict:
+    return await update_session(
         chat_id, session_id=str(uuid.uuid4()), started=False
     )
+
+
+async def get_last_update_id() -> int:
+    async with _state_lock:
+        state = load_state()
+        return state.get("_meta", {}).get("last_processed_update_id", 0)
+
+
+async def set_last_update_id(update_id: int) -> None:
+    async with _state_lock:
+        state = load_state()
+        meta = state.setdefault("_meta", {})
+        if update_id > meta.get("last_processed_update_id", 0):
+            meta["last_processed_update_id"] = update_id
+            save_state(state)
+
+
+async def _claim_update(update: Update) -> bool:
+    """True if this update is fresh; False if it was already processed."""
+    uid = update.update_id
+    last = await get_last_update_id()
+    if uid <= last:
+        log.info("skipping replayed update_id=%s (last=%s)", uid, last)
+        return False
+    return True
 
 
 def authorized(update: Update) -> bool:
@@ -154,24 +201,34 @@ def authorized(update: Update) -> bool:
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
         return
-    info = session_for(update.effective_chat.id)
-    await update.message.reply_text(
-        "Claude bridge online.\n"
-        f"Session: `{info['session_id']}`\n"
-        f"CWD: `{info['cwd']}`\n"
-        f"Permission mode: `{PERMISSION_MODE}`\n\n"
-        "Commands: /new /cd /pwd /ls /status",
-        parse_mode="Markdown",
-    )
+    if not await _claim_update(update):
+        return
+    try:
+        info = await session_for(update.effective_chat.id)
+        await update.message.reply_text(
+            "Claude bridge online.\n"
+            f"Session: `{info['session_id']}`\n"
+            f"CWD: `{info['cwd']}`\n"
+            f"Permission mode: `{PERMISSION_MODE}`\n\n"
+            "Commands: /new /cd /pwd /ls /status",
+            parse_mode="Markdown",
+        )
+    finally:
+        await set_last_update_id(update.update_id)
 
 
 async def cmd_new(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
         return
-    info = reset_session(update.effective_chat.id)
-    await update.message.reply_text(
-        f"New session: `{info['session_id']}`", parse_mode="Markdown"
-    )
+    if not await _claim_update(update):
+        return
+    try:
+        info = await reset_session(update.effective_chat.id)
+        await update.message.reply_text(
+            f"New session: `{info['session_id']}`", parse_mode="Markdown"
+        )
+    finally:
+        await set_last_update_id(update.update_id)
 
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -181,41 +238,51 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_pwd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
         return
-    info = session_for(update.effective_chat.id)
-    await update.message.reply_text(info["cwd"])
+    if not await _claim_update(update):
+        return
+    try:
+        info = await session_for(update.effective_chat.id)
+        await update.message.reply_text(info["cwd"])
+    finally:
+        await set_last_update_id(update.update_id)
 
 
 async def cmd_cd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
         return
-    chat_id = update.effective_chat.id
-    info = session_for(chat_id)
-    if not ctx.args:
+    if not await _claim_update(update):
+        return
+    try:
+        chat_id = update.effective_chat.id
+        info = await session_for(chat_id)
+        if not ctx.args:
+            await update.message.reply_text(
+                f"CWD: `{info['cwd']}`", parse_mode="Markdown"
+            )
+            return
+        new_cwd = _resolve_arg(ctx.args[0], info["cwd"])
+        if not Path(new_cwd).is_dir():
+            await update.message.reply_text(f"Not a directory: {new_cwd}")
+            return
+        if not is_cwd_allowed(new_cwd):
+            log.warning(
+                "blocked /cd: chat=%s requested=%r resolved=%r allowed_roots=%s",
+                chat_id,
+                new_cwd,
+                _safe_resolve(new_cwd),
+                [str(r) for r in ALLOWED_CWD_ROOTS],
+            )
+            allowed = ", ".join(str(r) for r in ALLOWED_CWD_ROOTS)
+            await update.message.reply_text(
+                f"Path not in allowed roots: {new_cwd}\nAllowed: {allowed}"
+            )
+            return
+        info = await update_session(chat_id, cwd=new_cwd)
         await update.message.reply_text(
             f"CWD: `{info['cwd']}`", parse_mode="Markdown"
         )
-        return
-    new_cwd = _resolve_arg(ctx.args[0], info["cwd"])
-    if not Path(new_cwd).is_dir():
-        await update.message.reply_text(f"Not a directory: {new_cwd}")
-        return
-    if not is_cwd_allowed(new_cwd):
-        log.warning(
-            "blocked /cd: chat=%s requested=%r resolved=%r allowed_roots=%s",
-            chat_id,
-            new_cwd,
-            _safe_resolve(new_cwd),
-            [str(r) for r in ALLOWED_CWD_ROOTS],
-        )
-        allowed = ", ".join(str(r) for r in ALLOWED_CWD_ROOTS)
-        await update.message.reply_text(
-            f"Path not in allowed roots: {new_cwd}\nAllowed: {allowed}"
-        )
-        return
-    info = update_session(chat_id, cwd=new_cwd)
-    await update.message.reply_text(
-        f"CWD: `{info['cwd']}`", parse_mode="Markdown"
-    )
+    finally:
+        await set_last_update_id(update.update_id)
 
 
 LS_MAX_ENTRIES = 80
@@ -224,97 +291,111 @@ LS_MAX_ENTRIES = 80
 async def cmd_ls(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
         return
-    chat_id = update.effective_chat.id
-    info = session_for(chat_id)
-    target = _resolve_arg(ctx.args[0], info["cwd"]) if ctx.args else info["cwd"]
-    if not Path(target).is_dir():
-        await update.message.reply_text(f"Not a directory: {target}")
-        return
-    if not is_cwd_allowed(target):
-        log.warning(
-            "blocked /ls: chat=%s requested=%r resolved=%r allowed_roots=%s",
-            chat_id,
-            target,
-            _safe_resolve(target),
-            [str(r) for r in ALLOWED_CWD_ROOTS],
-        )
-        allowed = ", ".join(str(r) for r in ALLOWED_CWD_ROOTS)
-        await update.message.reply_text(
-            f"Path not in allowed roots: {target}\nAllowed: {allowed}"
-        )
+    if not await _claim_update(update):
         return
     try:
-        entries = sorted(Path(target).iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
-    except PermissionError:
-        await update.message.reply_text(f"Permission denied: {target}")
-        return
-    if not entries:
-        await update.message.reply_text(f"{target}\n(empty)")
-        return
-    n_dirs = sum(1 for e in entries if e.is_dir())
-    n_files = len(entries) - n_dirs
-    shown = entries[:LS_MAX_ENTRIES]
-    lines = [f"{target} — {n_dirs} dirs, {n_files} files", ""]
-    for e in shown:
-        suffix = "/" if e.is_dir() else ""
-        lines.append(f"{e.name}{suffix}")
-    if len(entries) > LS_MAX_ENTRIES:
-        lines.append(f"... ({len(entries) - LS_MAX_ENTRIES} more)")
-    await update.message.reply_text("\n".join(lines))
+        chat_id = update.effective_chat.id
+        info = await session_for(chat_id)
+        target = _resolve_arg(ctx.args[0], info["cwd"]) if ctx.args else info["cwd"]
+        if not Path(target).is_dir():
+            await update.message.reply_text(f"Not a directory: {target}")
+            return
+        if not is_cwd_allowed(target):
+            log.warning(
+                "blocked /ls: chat=%s requested=%r resolved=%r allowed_roots=%s",
+                chat_id,
+                target,
+                _safe_resolve(target),
+                [str(r) for r in ALLOWED_CWD_ROOTS],
+            )
+            allowed = ", ".join(str(r) for r in ALLOWED_CWD_ROOTS)
+            await update.message.reply_text(
+                f"Path not in allowed roots: {target}\nAllowed: {allowed}"
+            )
+            return
+        try:
+            entries = sorted(
+                Path(target).iterdir(),
+                key=lambda p: (p.is_file(), p.name.lower()),
+            )
+        except PermissionError:
+            await update.message.reply_text(f"Permission denied: {target}")
+            return
+        if not entries:
+            await update.message.reply_text(f"{target}\n(empty)")
+            return
+        n_dirs = sum(1 for e in entries if e.is_dir())
+        n_files = len(entries) - n_dirs
+        shown = entries[:LS_MAX_ENTRIES]
+        lines = [f"{target} — {n_dirs} dirs, {n_files} files", ""]
+        for e in shown:
+            suffix = "/" if e.is_dir() else ""
+            lines.append(f"{e.name}{suffix}")
+        if len(entries) > LS_MAX_ENTRIES:
+            lines.append(f"... ({len(entries) - LS_MAX_ENTRIES} more)")
+        await update.message.reply_text("\n".join(lines))
+    finally:
+        await set_last_update_id(update.update_id)
 
 
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
         await update.message.reply_text("Unauthorized.")
         return
-
-    chat_id = update.effective_chat.id
-    info = session_for(chat_id)
-    prompt = update.message.text or ""
-    if not prompt.strip():
+    if not await _claim_update(update):
         return
-
-    await ctx.bot.send_chat_action(chat_id, ChatAction.TYPING)
-
-    cmd = [CLAUDE_BIN, "-p", prompt, "--permission-mode", PERMISSION_MODE,
-           "--output-format", "json"]
-    if info.get("started"):
-        cmd += ["--resume", info["session_id"]]
-    else:
-        cmd += ["--session-id", info["session_id"]]
-
-    log.info("chat=%s cwd=%s session=%s started=%s",
-             chat_id, info["cwd"], info["session_id"], info["started"])
-
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=info["cwd"],
-            capture_output=True,
-            text=True,
-            timeout=TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        await update.message.reply_text(f"Timed out after {TIMEOUT_SECONDS}s.")
-        return
+        chat_id = update.effective_chat.id
+        info = await session_for(chat_id)
+        prompt = update.message.text or ""
+        if not prompt.strip():
+            return
 
-    if result.returncode != 0:
-        err = (result.stderr or result.stdout or "").strip()
-        await update.message.reply_text(f"Error (rc={result.returncode}):\n{err[:3500]}")
-        return
+        await ctx.bot.send_chat_action(chat_id, ChatAction.TYPING)
 
-    update_session(chat_id, started=True)
+        cmd = [CLAUDE_BIN, "-p", prompt, "--permission-mode", PERMISSION_MODE,
+               "--output-format", "json"]
+        if info.get("started"):
+            cmd += ["--resume", info["session_id"]]
+        else:
+            cmd += ["--session-id", info["session_id"]]
 
-    text = result.stdout
-    try:
-        payload = json.loads(result.stdout)
-        text = payload.get("result", result.stdout)
-    except json.JSONDecodeError:
-        pass
+        log.info("chat=%s cwd=%s session=%s started=%s",
+                 chat_id, info["cwd"], info["session_id"], info["started"])
 
-    text = text.strip() or "(no output)"
-    for i in range(0, len(text), 4000):
-        await update.message.reply_text(text[i:i + 4000])
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=info["cwd"],
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            await update.message.reply_text(f"Timed out after {TIMEOUT_SECONDS}s.")
+            return
+
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or "").strip()
+            await update.message.reply_text(
+                f"Error (rc={result.returncode}):\n{err[:3500]}"
+            )
+            return
+
+        await update_session(chat_id, started=True)
+
+        text = result.stdout
+        try:
+            payload = json.loads(result.stdout)
+            text = payload.get("result", result.stdout)
+        except json.JSONDecodeError:
+            pass
+
+        text = text.strip() or "(no output)"
+        for i in range(0, len(text), 4000):
+            await update.message.reply_text(text[i:i + 4000])
+    finally:
+        await set_last_update_id(update.update_id)
 
 
 def main() -> None:
