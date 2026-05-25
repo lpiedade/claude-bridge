@@ -17,4 +17,4 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-exec ./.venv/bin/python bot.py
+exec ./.venv/bin/python -m app.main
