@@ -40,7 +40,7 @@ from core.config import (
     parse_model as _parse_model,
 )
 from core.logger import configure as _configure_logging, log
-from integrations.claude_client import extract_result_text
+from integrations.claude_client import extract_result_text, run_claude
 from repositories import session_repository as _state
 from repositories.session_repository import (
     claim_update as _claim_update,
@@ -302,29 +302,17 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
         await ctx.bot.send_chat_action(chat_id, ChatAction.TYPING)
 
-        cmd = [CLAUDE_BIN, "-p", prompt, "--permission-mode", PERMISSION_MODE,
-               "--output-format", "json"]
-        effort = info.get("effort")
-        if effort:
-            cmd += ["--effort", effort]
-        model = info.get("model")
-        if model:
-            cmd += ["--model", model]
-        if info.get("started"):
-            cmd += ["--resume", info["session_id"]]
-        else:
-            cmd += ["--session-id", info["session_id"]]
-
         log.info("chat=%s cwd=%s session=%s started=%s",
                  chat_id, info["cwd"], info["session_id"], info["started"])
 
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=info["cwd"],
-                capture_output=True,
-                text=True,
-                timeout=TIMEOUT_SECONDS,
+            result = run_claude(
+                prompt,
+                info["session_id"],
+                info["cwd"],
+                effort=info.get("effort"),
+                model=info.get("model"),
+                started=info.get("started", False),
             )
         except subprocess.TimeoutExpired:
             await update.message.reply_text(f"Timed out after {TIMEOUT_SECONDS}s.")
