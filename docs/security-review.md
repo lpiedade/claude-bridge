@@ -297,3 +297,194 @@ In addition to the original triggers, re-review when:
 - The `_redact` pattern list changes (verify no over-redaction breaks legitimate output).
 - The `ALLOWED_CWD_ROOTS` default expands beyond the current three roots.
 - `concurrent_updates` is set to `True` in the `Application` builder — re-open F-05 and F-07.
+
+---
+
+# Review #3 — 2026-05-25 (post-modularization pass)
+
+**Reviewed:** 2026-05-25
+**Commit Evaluated:** `3542445`
+**Scope:** the modular tree introduced by commits `2d80262` → `3542445`:
+`app/main.py`, `core/{config,logger}.py`, `service/handlers/{__init__,_common,cwd,effort,message,model,session,start}.py`,
+`integrations/claude_client.py`, `repositories/session_repository.py`, `utils/{paths,redact}.py`,
+`run.sh`, `launchd/com.local.claude-bridge.plist`, `.env.example`. The monolithic `bot.py`
+referenced in Reviews #1 and #2 no longer exists (removed in `822d0b6`).
+
+**Method:** re-classify every Review #1 finding against the new modular code; then read each
+module end-to-end for *new* attack surface introduced by the split (handler registration, two
+new commands `/effort` and `/model`, JSON output parsing in `claude_client`, packaging via
+`pyproject.toml`). Same threat model and out-of-scope list as Review #1.
+
+## Status of Review #1 findings against the modular tree
+
+| ID | Severity | Status | Where verified |
+|---|---|---|---|
+| F-01 | Critical | Accepted (operational) | `PERMISSION_MODE` default still `"bypassPermissions"` at `core/config.py:23`; threaded into `integrations/claude_client.py:21`. Mitigation unchanged: Telegram 2FA. |
+| F-02 | High | Fixed | Allowlist logic moved to `utils/paths.py:31-45` (`resolve(strict=True)` + ancestor check). Re-exposed via `service/handlers/_common.py:17-19`. Gated in `cwd.py:51-63` (`/cd`) and `cwd.py:82-94` (`/ls`). Startup fail-fast preserved at `app/main.py:18-22`. Blocked attempts still log `chat_id` + requested + resolved + roots. |
+| F-03 | High | Fixed | `repositories/session_repository.py:13-15` creates parent with `mode=0o700` and unconditionally re-applies `0o700`; `:17-21` tightens an existing `state.json` to `0o600` with a `log.warning`. `save_state` chmods the tmp file to `0o600` before atomic rename. |
+| F-04 | High | Fixed | `repositories/session_repository.py:39-43`: write to `.json.tmp` → `chmod 0600` → `os.replace`. `load_state` (`:24-36`) catches `JSONDecodeError`, renames the bad file to `state.json.corrupt`, and returns `{}`. |
+| F-05 | High | Fixed | Module-level `_state_lock = asyncio.Lock()` at `repositories/session_repository.py:46`; all eight async accessors (`session_for`, `update_session`, `reset_session`, `get_last_update_id`, `set_last_update_id`) wrap read-modify-write inside `async with _state_lock`. Each returns a `dict(...)` shallow copy. All call sites in `service/handlers/*.py` use `await`. |
+| F-06 | Medium | Fixed | `claim_update()` + `set_last_update_id()` at `repositories/session_repository.py:95-117`. Applied in `try/finally` blocks in every handler: `start.py:20,34`, `session.py:19,25`, `cwd.py:27/33`, `cwd.py:39/67`, `cwd.py:73/117`, `effort.py:21,47`, `model.py:21,47`, `message.py:28,79`. `cmd_status` inherits via delegation to `cmd_start`. |
+| F-07 | Medium | Accepted (with addendum) | Rate limiter still not implemented. `concurrent_updates` not set explicitly, so the default `False` still applies; `message.py` still uses synchronous `subprocess.run` in `integrations/claude_client.py:49-55`. Addendum from Review #1 holds. |
+| F-08 | Medium | Fixed | Redaction extracted to `utils/redact.py:8-13` (same five patterns: `$HOME`, `/Users/<user>`, email, hex ≥32, `sk-…`). Chat receives `rc` + redacted last line + pointer to `launchd.err` (`message.py:57-69`); full stderr (truncated to 5000 chars) goes to the log only. |
+| F-09 | Medium | Fixed | `run.sh:6-13` rejects start unless `stat -f '%Su:%A' .env` equals `<whoami>:600`; error includes the exact `chmod`/`chown` fix command. |
+| F-10 | Low | Fixed (by removal) | `CLAUDE_BIN` is a hard-coded constant at `core/config.py:22` (`/opt/homebrew/bin/claude`). No env override path; `.env.example` does not list it. |
+| F-11 | Low | Fixed | No `parse_mode=` arguments survive in the modular tree. `grep -R "parse_mode" service/ app/` returns no hits. All reply text is plain. |
+| F-12 | Low | **Still open** | `service/handlers/message.py:39-42` still logs `chat=<id> cwd=<path> session=<uuid> started=<bool>` in plaintext. Was scheduled as the "next walkthrough step" after Review #2 but is unchanged in this revision. |
+| F-13 | Informational | Open | No upper-bound check on `prompt` length in `message.py:33-34`. Telegram caps at 4096 chars, so practical exposure unchanged. |
+| F-14 | Informational | Open | `launchd/com.local.claude-bridge.plist` still has no `SoftResourceLimits` or `sandbox-exec`. The plist is now version-controlled in-tree (commit `79c0b21`), which is itself a positive — drift between the deployed and reviewed copy is now visible in `git diff`. |
+
+## New observations introduced by the refactor
+
+The split touched many files but rearranged behavior more than it changed it. Each delta below
+was inspected for new attack surface:
+
+- **Module-level side effects in `repositories/session_repository.py:13-21`.** `mkdir`, two
+  `chmod` calls, and a conditional `log.warning` execute at *import* time, before `app/main.py`
+  calls `configure_logging()`. The warning therefore goes through the root logger's default
+  handler — output still reaches `launchd.err` (it is stderr) but without the configured
+  timestamp prefix. Cosmetic only. **No new finding.** Same observation appears in Review #2;
+  carried forward verbatim.
+
+- **`/effort` and `/model` (`effort.py`, `model.py`) — new user-controllable flags forwarded to
+  the `claude` subprocess.** Both handlers validate the argument against an in-code allowlist
+  (`VALID_EFFORTS`, `VALID_MODELS` in `core/config.py:26-27`) and reject anything else with an
+  error message. The accepted value is passed as a *separate* argv element (`["--effort", v]`,
+  `["--model", v]`) in `integrations/claude_client.py:24-27` — no shell interpolation, no
+  `shell=True`, no risk of argument splitting. Defaults read from the environment are likewise
+  funneled through `parse_effort` / `parse_model` (`core/config.py:30-41`) which return `None`
+  for any value outside the allowlist, so a tampered `.env` cannot inject a custom flag value.
+  **No new finding.**
+
+- **`integrations/claude_client.py:58-74` (`extract_result_text`).** Parses the JSON envelope
+  emitted by `claude --output-format json`. Uses `json.loads` (no `eval`, no shell) and
+  gracefully falls back to the raw stdout when the payload is not parseable or lacks a
+  `result` key. The function reads from `claude`'s stdout, which we already trust as the
+  subprocess we spawn ourselves. Memory exposure is bounded by Claude's own output size and by
+  the 10-minute (configurable) subprocess timeout. **No new finding.**
+
+- **Handler registration centralized in `service/handlers/__init__.py:14-23`.** Nine handlers
+  total; every one wraps real work in `if not authorized(update): return` and `if not await
+  claim_update(update): return`, then a `try / finally: await set_last_update_id(...)`. The
+  pattern is mechanical and uniform — easy to audit, easy to break next time a handler is
+  added. Recommend (operationally, not a finding) that any future handler PR is reviewed
+  specifically for the auth + claim + finally trio. **No new finding.**
+
+- **`cmd_status` delegates to `cmd_start` (`start.py:37-38`).** Both calls execute
+  `claim_update` + `set_last_update_id`. The `claim_update` in the *outer* `cmd_status` would
+  see the update as fresh, the *inner* call inside `cmd_start` would then see it as already
+  processed — but `claim_update` only returns False; it does not raise, and the early-return
+  path means `cmd_start`'s reply still fires because the cursor is not yet advanced (the
+  `set_last_update_id` is inside the `finally` of `cmd_status`, not yet executed when
+  `cmd_start` runs). Verified by tracing: `cmd_status` calls `cmd_start` before its own
+  `finally` runs, so `last_processed_update_id` is still the old value when `cmd_start`'s
+  `claim_update` runs. Both fire; the cursor is then set twice to the same value (idempotent).
+  Functionally correct, but the call graph is non-obvious — **N-01** below.
+
+- **`cmd_ls` output formatting.** Filenames are written to Telegram verbatim
+  (`cwd.py:110-114`). A filename containing a newline (legal on POSIX) could split the
+  rendered listing across visual rows. Not a security issue — Telegram already escapes
+  control bytes for display — but worth a note for future work: **N-02** below.
+
+- **Packaging via `pyproject.toml`.** Introduces `claude-bridge` as a console-script entry
+  point. The launchd plist still calls `run.sh` (not the entry-point binary), so the `.env`
+  permission check still runs. If the deployment ever switches to invoking the console script
+  directly (skipping `run.sh`), the `.env` mode check is bypassed. **N-03** below — recorded
+  as a re-review trigger, not an active finding.
+
+## New findings (this pass)
+
+### N-01 — Double-claim of `update_id` in `/status` delegation chain &nbsp;`Severity: Informational`
+
+**Location:** `service/handlers/start.py:37-38` (delegation), `start.py:20`, `start.py:34` (inner claim + finally)
+
+**Description:** `cmd_status` is a one-liner that awaits `cmd_start`. Both functions call
+`claim_update` and both schedule `set_last_update_id` in `finally`. The outer `claim_update`
+returns True (fresh update), runs `cmd_start`, which itself calls `claim_update` — also True
+because the outer cursor advance hasn't happened yet — and then both `finally` blocks run
+`set_last_update_id`. The second call is a no-op (`set_last_update_id` only advances when the
+new id is strictly greater than the stored one), so behavior is correct, but the code reads
+as if it depends on that idempotency property without saying so.
+
+**Impact:** None today. Risk is that someone refactors `set_last_update_id` to always assign
+(removing the `>` guard) and silently breaks no other handler — only this one.
+
+**Remediation:** simplest fix is to invert the delegation: `cmd_start` becomes a thin alias for
+`cmd_status`, or both share a `_show_status(update, ctx)` private function and each is a
+single-claim handler. Either approach removes the implicit dependency on idempotency.
+
+### N-02 — `/ls` echoes raw filenames into Telegram &nbsp;`Severity: Informational`
+
+**Location:** `service/handlers/cwd.py:110-114`
+
+**Description:** `Path.iterdir()` returns names verbatim. A directory containing a filename
+like `"hello\nworld"` (legal on POSIX) renders as two visual rows in the Telegram reply, and a
+malicious filename could mimic the formatted header (`{target} — N dirs, M files`). This is
+inside the allowlist and Markdown is disabled (F-11 fix), so it cannot produce a clickable
+exploit, but it can mislead the operator about what's on disk.
+
+**Impact:** Cosmetic / minor display-spoofing. Not exploitable beyond the existing F-01 trust
+boundary.
+
+**Remediation:** replace control characters in each entry before printing, e.g.
+`e.name.encode("unicode_escape").decode()` or `repr(e.name)` when the name contains
+non-printables.
+
+### N-03 — Future deployment path (`claude-bridge` console script) would bypass `.env` mode check &nbsp;`Severity: Informational`
+
+**Location:** `pyproject.toml` (entry point), `run.sh:6-13` (the check that would be skipped),
+`launchd/com.local.claude-bridge.plist:9-11` (currently still calls `run.sh`).
+
+**Description:** Today the launchd job invokes `run.sh`, which enforces the `.env`
+ownership/mode invariant (F-09 fix). The new packaging adds `claude-bridge` as a console-script
+entry point installable via pip. If the operator (or a future README change) switches the
+plist or any other invocation path to call the entry-point binary directly, the `.env` check
+is silently bypassed — and the bot starts whether or not `.env` is `0600`.
+
+**Impact:** Latent regression of F-09. Not exploitable today; flagged because the packaging
+change increases the number of ways the bot can be launched.
+
+**Remediation:**
+- (Lowest cost) keep `run.sh` as the only blessed entrypoint; document this in `README.md` and
+  in a comment at the top of `pyproject.toml`'s `[project.scripts]` block.
+- (Better) move the `.env` mode check into Python (e.g. early in `app/main.py:main()`) so that
+  every invocation path enforces it regardless of how the process is started.
+
+## Residual risk summary (delta from Review #2)
+
+The dominant residual risk is still **F-01 (`bypassPermissions`)**; the mitigation is still
+Telegram 2FA only. Everything else compounds on F-01, and the refactor did not change that.
+
+Secondary residuals carried forward:
+
+- **F-07 (rate limit)** — still accepted; serialization via `concurrent_updates=False` holds.
+- **F-12 (log plaintext)** — still open; intended as the "next walkthrough step" but unchanged.
+- **F-13, F-14** — informational; no action planned this pass.
+- **N-01, N-02, N-03** — new, all Informational; recorded for future hardening.
+
+## Quick-win checklist (delta from Review #2)
+
+After this pass, the highest-leverage remaining fixes are unchanged in priority:
+
+1. **F-12** (~5 lines in `service/handlers/message.py:39-42` and `repositories/session_repository.py`)
+   — hash `chat_id`, truncate `session_id` to 8 chars.
+2. **N-03** (~5 lines in `app/main.py`) — move the `.env` mode check into Python so every
+   launch path enforces it.
+3. **N-01** (~5 lines in `service/handlers/start.py`) — collapse the delegation into a shared
+   private helper to remove the implicit idempotency assumption.
+
+## Re-review trigger (additive to Reviews #1 and #2)
+
+Re-run this review when any of the following change:
+- The `_meta` schema in `state.json` grows additional keys.
+- The `_redact` pattern list in `utils/redact.py` changes.
+- `ALLOWED_CWD_ROOTS` default expands beyond the current three roots.
+- `concurrent_updates` is set to `True` on the `Application` builder.
+- The launchd plist (or any other invocation path) stops calling `run.sh` and invokes the
+  `claude-bridge` console script directly (see **N-03**).
+- A new handler is added under `service/handlers/` — verify the `authorized + claim_update +
+  try/finally set_last_update_id` trio is present and that any new subprocess flag is
+  allowlisted in `core/config.py`.
+- `VALID_EFFORTS` or `VALID_MODELS` in `core/config.py` are widened, especially to include
+  values that contain shell-special characters.
+
