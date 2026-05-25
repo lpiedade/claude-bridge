@@ -108,6 +108,25 @@ def _redact(s: str) -> str:
     return s
 
 
+def extract_result_text(stdout: str) -> str:
+    """Pull the `result` field from `claude --output-format json` stdout.
+
+    Accepts both shapes the CLI may emit (single object, or a list of events)
+    and falls back to the raw stdout when no `result` is found.
+    """
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return stdout
+    if isinstance(payload, dict):
+        return payload.get("result", stdout)
+    if isinstance(payload, list):
+        for item in reversed(payload):
+            if isinstance(item, dict) and "result" in item:
+                return item["result"]
+    return stdout
+
+
 def _safe_resolve(path: str) -> str:
     """Best-effort resolve for logging; never raises."""
     try:
@@ -451,12 +470,7 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
         await update_session(chat_id, started=True)
 
-        text = result.stdout
-        try:
-            payload = json.loads(result.stdout)
-            text = payload.get("result", result.stdout)
-        except json.JSONDecodeError:
-            pass
+        text = extract_result_text(result.stdout)
 
         text = text.strip() or "(no output)"
         for i in range(0, len(text), 4000):
