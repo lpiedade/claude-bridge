@@ -416,19 +416,20 @@ async def cmd_effort(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         info = await session_for(chat_id)
         if not ctx.args:
             await update.message.reply_text(
-                f"Effort: {info.get('effort') or '(default)'}\n"
-                "Usage: /effort <low|medium|high|xhigh|max|none>"
+                f"Effort: {info.get('effort')}\n"
+                f"Default: {DEFAULT_EFFORT}\n"
+                f"Usage: /effort <{'|'.join(sorted(VALID_EFFORTS))}|default>"
             )
             return
         arg = ctx.args[0].strip().lower()
-        if arg == "none":
-            await update_session(chat_id, effort=None)
-            await update.message.reply_text("Effort cleared (CLI default).")
+        if arg == "default":
+            info = await update_session(chat_id, effort=DEFAULT_EFFORT)
+            await update.message.reply_text(f"Effort: {info['effort']} (default)")
             return
         if arg not in VALID_EFFORTS:
             await update.message.reply_text(
                 f"Invalid effort: {arg}. "
-                f"Choose: {', '.join(sorted(VALID_EFFORTS))}, none"
+                f"Choose: {', '.join(sorted(VALID_EFFORTS))}, default"
             )
             return
         info = await update_session(chat_id, effort=arg)
