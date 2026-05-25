@@ -72,3 +72,27 @@ def extract_result_text(stdout: str) -> str:
             if isinstance(item, dict) and "result" in item:
                 return item["result"]
     return stdout
+
+
+def extract_permission_denials(stdout: str) -> list[dict]:
+    """Return any `permission_denials` entries reported by the CLI.
+
+    The CLI surfaces denied tool calls in the final `result` event under
+    `permission_denials: [{tool_name, tool_use_id, tool_input}]`. Accepts both
+    the single-object and list-of-events stdout shapes; returns [] if absent
+    or malformed.
+    """
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return []
+    candidates: list[dict] = []
+    if isinstance(payload, dict):
+        candidates.append(payload)
+    elif isinstance(payload, list):
+        candidates.extend(p for p in payload if isinstance(p, dict))
+    for item in reversed(candidates):
+        denials = item.get("permission_denials")
+        if isinstance(denials, list):
+            return [d for d in denials if isinstance(d, dict)]
+    return []

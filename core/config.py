@@ -20,7 +20,7 @@ ALLOWED_CWD_ROOTS = [
     if p.strip()
 ]
 CLAUDE_BIN = "/opt/homebrew/bin/claude"
-PERMISSION_MODE = os.environ.get("CLAUDE_BRIDGE_PERMISSION_MODE", "bypassPermissions")
+PERMISSION_MODE = os.environ.get("CLAUDE_BRIDGE_PERMISSION_MODE", "acceptEdits")
 TIMEOUT_SECONDS = int(os.environ.get("CLAUDE_BRIDGE_TIMEOUT", "600"))
 
 VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
@@ -43,3 +43,24 @@ def parse_model(value: str | None) -> str | None:
 
 DEFAULT_EFFORT = parse_effort(os.environ.get("CLAUDE_BRIDGE_EFFORT")) or "low"
 DEFAULT_MODEL = parse_model(os.environ.get("CLAUDE_BRIDGE_MODEL")) or "haiku"
+
+
+def _parse_bool(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+COST_ALERT_ENABLED = _parse_bool(os.environ.get("COST_ALERT_ENABLED"), True)
+COST_ALERT_THRESHOLD_USD = float(os.environ.get("COST_ALERT_THRESHOLD_USD", "10"))
+COST_ALERT_RECIPIENT = os.environ.get(
+    "COST_ALERT_RECIPIENT", "leonardo.piedade@accenture.com"
+)
+COST_ALERT_INTERVAL_SECONDS = int(
+    os.environ.get("COST_ALERT_INTERVAL_SECONDS", "3600")
+)
+CLAUDE_PROJECTS_DIR = Path(
+    os.path.expanduser(
+        os.environ.get("CLAUDE_PROJECTS_DIR", "~/.claude/projects")
+    )
+)

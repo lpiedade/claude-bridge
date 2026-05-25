@@ -17,6 +17,7 @@ from pathlib import Path
 _LOG_DIR = Path(os.path.expanduser("~/.claude-bridge"))
 _BRIDGE_LOG = _LOG_DIR / "bridge.log"
 _CONVERSATION_LOG = _LOG_DIR / "conversation.log"
+_PERMISSION_LOG = _LOG_DIR / "permissions.log"
 
 _MAX_BYTES = 5 * 1024 * 1024
 _BACKUPS = 5
@@ -75,6 +76,15 @@ def configure() -> None:
         conv.removeHandler(h)
     conv.addHandler(_rotating(_CONVERSATION_LOG, _CONV_FMT))
 
+    # Permission logger: isolated, dedicated rotating file for denial audit trail.
+    perm = logging.getLogger("claude-bridge.permission")
+    perm.setLevel(level)
+    perm.propagate = False
+    for h in list(perm.handlers):
+        perm.removeHandler(h)
+    perm.addHandler(_rotating(_PERMISSION_LOG, _CONV_FMT))
+
 
 log = logging.getLogger("claude-bridge")
 conversation_log = logging.getLogger("claude-bridge.conversation")
+permission_log = logging.getLogger("claude-bridge.permission")

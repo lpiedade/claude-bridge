@@ -1,6 +1,7 @@
 """Free-form Telegram messages → forwarded to the claude CLI."""
 from __future__ import annotations
 
+import json
 import subprocess
 
 from telegram import Update
@@ -8,8 +9,12 @@ from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
 from core.config import TIMEOUT_SECONDS
-from core.logger import conversation_log, log
-from integrations.claude_client import extract_result_text, run_claude
+from core.logger import conversation_log, log, permission_log
+from integrations.claude_client import (
+    extract_permission_denials,
+    extract_result_text,
+    run_claude,
+)
 from repositories.session_repository import (
     claim_update,
     session_for,
@@ -27,6 +32,22 @@ def _truncate(s: str, limit: int = _MAX_LOG) -> str:
     if len(s) <= limit:
         return s
     return s[:limit] + f"... [+{len(s) - limit} chars truncated]"
+
+
+_INPUT_PREVIEW = 300
+
+
+def _format_denial(denial: dict) -> str:
+    tool = denial.get("tool_name", "?")
+    raw = denial.get("tool_input", {})
+    try:
+        body = json.dumps(raw, ensure_ascii=False)
+    except (TypeError, ValueError):
+        body = str(raw)
+    body = redact(body)
+    if len(body) > _INPUT_PREVIEW:
+        body = body[:_INPUT_PREVIEW] + "…"
+    return f"• {tool}: {body}"
 
 
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -85,6 +106,25 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         await update_session(chat_id, started=True)
+
+        denials = extract_permission_denials(result.stdout)
+        if denials:
+            for d in denials:
+                permission_log.info(
+                    "chat=%s session=%s DENIED tool=%s input=%s",
+                    chat_id,
+                    info["session_id"],
+                    d.get("tool_name", "?"),
+                    _truncate(redact(json.dumps(d.get("tool_input", {}), ensure_ascii=False))),
+                )
+            header = (
+                f"⚠️ Claude pediu permissão para {len(denials)} ação(ões) "
+                f"e foi bloqueado (modo: acceptEdits):"
+            )
+            body = "\n".join(_format_denial(d) for d in denials)
+            notice = f"{header}\n{body}"
+            for i in range(0, len(notice), 4000):
+                await update.message.reply_text(notice[i:i + 4000])
 
         text = extract_result_text(result.stdout)
         text = text.strip() or "(no output)"

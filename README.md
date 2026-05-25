@@ -11,7 +11,7 @@ Telegram ↔ Claude Code CLI bridge running on the Mac. Lets you talk to the Cla
         ↓ (long-poll)
 [python -m app.main on the Mac via launchd]
         ↓ (subprocess)
-[claude -p <prompt> --resume <session-id> --permission-mode bypassPermissions]
+[claude -p <prompt> --resume <session-id> --permission-mode acceptEdits]
 ```
 
 Per-chat state persisted in `~/.claude-bridge/state.json` (session_id + cwd + `started` flag).
@@ -42,7 +42,7 @@ service/handlers/
 └── message.py                    # free-form text → claude CLI
 run.sh                            # launchd entrypoint (sources .env, execs python -m app.main)
 launchd/                          # versioned plist + install README
-tests/                            # pytest, 56 cases
+tests/                            # pytest, 93 cases
 pyproject.toml                    # package declaration; `claude-bridge` console script
 ```
 
@@ -127,6 +127,7 @@ Three rotating sinks under `~/.claude-bridge/` (5 MB × 5 backups each):
 |---|---|
 | `bridge.log` | Operational app log at the configured level (default `INFO`): handler entries, session state, claude CLI exit codes, unhandled exception tracebacks. This is the file to grep when troubleshooting. |
 | `conversation.log` | Prompt/response history only — one line per inbound prompt and one per outbound reply, redacted via `utils/redact` and truncated at 4000 chars. Use this to review what was actually said. |
+| `permissions.log` | Audit trail of every tool call the Claude CLI denied for permission reasons (one line per denial: tool name + redacted, truncated `tool_input`). Empty when `CLAUDE_BRIDGE_PERMISSION_MODE=bypassPermissions` since nothing is ever denied. |
 | `launchd.err` | Captured by launchd. Receives `WARNING+` from the app plus anything the Python interpreter writes to stderr before logging is configured (import errors, missing env vars, crash tracebacks from launchd restarts). Stays quiet in normal operation. |
 | `launchd.out` | Captured by launchd stdout. Normally empty — the app does not print to stdout. |
 | `state.json` | Per-chat session state (not a log). |
@@ -134,6 +135,7 @@ Three rotating sinks under `~/.claude-bridge/` (5 MB × 5 backups each):
 ```bash
 tail -50 ~/.claude-bridge/bridge.log
 tail -50 ~/.claude-bridge/conversation.log
+tail -50 ~/.claude-bridge/permissions.log
 tail -50 ~/.claude-bridge/launchd.err
 ```
 
@@ -151,7 +153,7 @@ Third-party loggers (`httpx`, `httpcore`, `telegram`) are pinned at `WARNING` to
 | `CLAUDE_BRIDGE_ALLOWED_CHATS` | (required) | Comma-separated numeric `chat_id`s |
 | `CLAUDE_BRIDGE_CWD` | `~/EDF/Personal/Github` | Default working directory for new sessions |
 | `CLAUDE_BRIDGE_CWD_ROOTS` | `~/EDF/Personal/Github,~/EDF/BlindBet,/tmp` | Allowlist of roots `/cd` may switch into (comma-separated). `DEFAULT_CWD` must be under one of these or the bot refuses to start. Symlinks are resolved before the check. |
-| `CLAUDE_BRIDGE_PERMISSION_MODE` | `bypassPermissions` | See "Security" below |
+| `CLAUDE_BRIDGE_PERMISSION_MODE` | `acceptEdits` | See "Security" and "Permission notifications" below. Valid: `default`, `acceptEdits`, `plan`, `bypassPermissions`, `auto`, `dontAsk`. |
 | `CLAUDE_BRIDGE_TIMEOUT` | `600` | Per-message timeout in seconds |
 | `CLAUDE_BRIDGE_EFFORT` | (unset) | Default effort level passed as `--effort` to the Claude CLI. One of `low`, `medium`, `high`, `xhigh`, `max`. Per-chat override via `/effort`. |
 | `CLAUDE_BRIDGE_MODEL` | `haiku` | Default model passed as `--model` to the Claude CLI. One of `opus`, `sonnet`, `haiku`. Per-chat override via `/model`. Haiku is the default to keep costs low. |
@@ -166,10 +168,19 @@ After editing `.env`, reload with `launchctl kickstart -k gui/$UID/com.local.cla
 ## Security
 
 - **Chat allowlist** — only chats in `CLAUDE_BRIDGE_ALLOWED_CHATS` get replies; everyone else sees "Unauthorized".
-- **`bypassPermissions`** — required to run tasks without human approval. Equivalent to "yes to everything": Claude can edit/delete files inside `cwd` and run arbitrary shell commands. Mitigations:
+- **Permission mode** — defaults to `acceptEdits`: Claude can edit files inside `cwd` automatically, but shell commands and other sensitive tool calls are denied (and surfaced — see below). Override to `bypassPermissions` only if you need fully unattended execution; that disables all guards and Claude can run arbitrary shell commands.
   - Keep `cwd` in a safe directory (not `$HOME` root).
-  - Switch to `acceptEdits` in `.env` to block shell command execution (file edits only).
+  - Migrating from a previous install: existing `.env` files that still set `CLAUDE_BRIDGE_PERMISSION_MODE=bypassPermissions` keep working as before. Unset the variable to pick up the new `acceptEdits` default.
 - **Token and chat_id in `.env`** — chmod 600. Never commit to git.
+
+## Permission notifications
+
+In modes other than `bypassPermissions`, the Claude CLI denies any tool call that lacks pre-granted permission (e.g. `Bash`, writes outside `cwd`). The bridge surfaces every such denial in two places:
+
+- A Telegram reply prefixed `⚠️ Claude pediu permissão para N ação(ões) e foi bloqueado (modo: acceptEdits):` listing the `tool_name` and a truncated, redacted preview of `tool_input` (one bullet per denial). Sent before the regular result message so the user sees both.
+- One line per denial appended to `~/.claude-bridge/permissions.log` (audit trail, also redacted/truncated).
+
+Today the flow is one-way (notification only) — there is no Sim/Não button to grant permission in-turn. If you need that, switch the chat to a project where the edit is auto-allowed, or re-run with `CLAUDE_BRIDGE_PERMISSION_MODE=bypassPermissions` temporarily.
 
 ## Cost Alert
 
