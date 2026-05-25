@@ -12,6 +12,7 @@ Commands:
     /pwd     - print current working directory
     /ls      - list entries in cwd (or in an allowed path): `/ls ~/EDF/BlindBet`
     /effort  - show or set effort level: `/effort high` (low|medium|high|xhigh|max|none)
+    /model   - show or set model: `/model opus` (opus|sonnet|haiku|default)
 """
 from __future__ import annotations
 
@@ -63,7 +64,19 @@ def _parse_effort(value: str | None) -> str | None:
     return v if v in VALID_EFFORTS else None
 
 
-DEFAULT_EFFORT = _parse_effort(os.environ.get("CLAUDE_BRIDGE_EFFORT"))
+DEFAULT_EFFORT = _parse_effort(os.environ.get("CLAUDE_BRIDGE_EFFORT")) or "low"
+
+VALID_MODELS = {"opus", "sonnet", "haiku"}
+
+
+def _parse_model(value: str | None) -> str | None:
+    if not value:
+        return None
+    v = value.strip().lower()
+    return v if v in VALID_MODELS else None
+
+
+DEFAULT_MODEL = _parse_model(os.environ.get("CLAUDE_BRIDGE_MODEL")) or "haiku"
 
 STATE_FILE = Path.home() / ".claude-bridge" / "state.json"
 STATE_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -188,6 +201,7 @@ def _new_session_entry() -> dict:
         "session_id": str(uuid.uuid4()),
         "cwd": DEFAULT_CWD,
         "effort": DEFAULT_EFFORT,
+        "model": DEFAULT_MODEL,
         "started": False,
     }
 
@@ -199,6 +213,12 @@ async def session_for(chat_id: int) -> dict:
         if key not in state:
             state[key] = _new_session_entry()
             save_state(state)
+        else:
+            defaults = _new_session_entry()
+            missing = {k: v for k, v in defaults.items() if k not in state[key]}
+            if missing:
+                state[key].update(missing)
+                save_state(state)
         return dict(state[key])
 
 
@@ -214,9 +234,12 @@ async def update_session(chat_id: int, **changes) -> dict:
 
 
 async def reset_session(chat_id: int) -> dict:
-    return await update_session(
-        chat_id, session_id=str(uuid.uuid4()), started=False
-    )
+    async with _state_lock:
+        state = load_state()
+        key = str(chat_id)
+        state[key] = _new_session_entry()
+        save_state(state)
+        return dict(state[key])
 
 
 async def get_last_update_id() -> int:
@@ -260,8 +283,9 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             f"Session: {info['session_id']}\n"
             f"CWD: {info['cwd']}\n"
             f"Permission mode: {PERMISSION_MODE}\n"
-            f"Effort: {info.get('effort') or '(default)'}\n\n"
-            "Commands: /new /cd /pwd /ls /effort /status",
+            f"Effort: {info.get('effort') or '(default)'}\n"
+            f"Model: {info.get('model') or '(default)'}\n\n"
+            "Commands: /new /cd /pwd /ls /effort /model /status",
         )
     finally:
         await set_last_update_id(update.update_id)
@@ -413,6 +437,38 @@ async def cmd_effort(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await set_last_update_id(update.update_id)
 
 
+async def cmd_model(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if not authorized(update):
+        return
+    if not await _claim_update(update):
+        return
+    try:
+        chat_id = update.effective_chat.id
+        info = await session_for(chat_id)
+        if not ctx.args:
+            await update.message.reply_text(
+                f"Model: {info.get('model') or '(default)'}\n"
+                f"Default: {DEFAULT_MODEL}\n"
+                f"Usage: /model <{'|'.join(sorted(VALID_MODELS))}|default>"
+            )
+            return
+        arg = ctx.args[0].strip().lower()
+        if arg == "default":
+            info = await update_session(chat_id, model=DEFAULT_MODEL)
+            await update.message.reply_text(f"Model: {info['model']} (default)")
+            return
+        if arg not in VALID_MODELS:
+            await update.message.reply_text(
+                f"Invalid model: {arg}. "
+                f"Choose: {', '.join(sorted(VALID_MODELS))}, default"
+            )
+            return
+        info = await update_session(chat_id, model=arg)
+        await update.message.reply_text(f"Model: {info['model']}")
+    finally:
+        await set_last_update_id(update.update_id)
+
+
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
         await update.message.reply_text("Unauthorized.")
@@ -430,9 +486,12 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
         cmd = [CLAUDE_BIN, "-p", prompt, "--permission-mode", PERMISSION_MODE,
                "--output-format", "json"]
-        effort = info.get("effort") or DEFAULT_EFFORT
+        effort = info.get("effort")
         if effort:
             cmd += ["--effort", effort]
+        model = info.get("model")
+        if model:
+            cmd += ["--model", model]
         if info.get("started"):
             cmd += ["--resume", info["session_id"]]
         else:
@@ -492,6 +551,7 @@ def main() -> None:
     app.add_handler(CommandHandler("pwd", cmd_pwd))
     app.add_handler(CommandHandler("ls", cmd_ls))
     app.add_handler(CommandHandler("effort", cmd_effort))
+    app.add_handler(CommandHandler("model", cmd_model))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     log.info("Bridge online. Allowed chats: %s", ALLOWED_CHAT_IDS)
     app.run_polling()

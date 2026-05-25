@@ -60,6 +60,8 @@ tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
 | `/ls ~/EDF/BlindBet` | List entries in a path (must be inside an allowed root) |
 | `/effort` | Show the effort level for this chat (or `(default)` if unset) |
 | `/effort high` | Set effort for this chat. Valid: `low`, `medium`, `high`, `xhigh`, `max`, `none` (clears override) |
+| `/model` | Show the model for this chat and the default |
+| `/model opus` | Set model for this chat. Valid: `opus`, `sonnet`, `haiku`, `default` (resets to `CLAUDE_BRIDGE_MODEL`/`haiku`) |
 | `<any text>` | Send as a prompt to Claude Code |
 
 ## Management (launchd)
@@ -105,6 +107,7 @@ cat ~/.claude-bridge/state.json          # per-chat session state
 | `CLAUDE_BRIDGE_PERMISSION_MODE` | `bypassPermissions` | See "Security" below |
 | `CLAUDE_BRIDGE_TIMEOUT` | `600` | Per-message timeout in seconds |
 | `CLAUDE_BRIDGE_EFFORT` | (unset) | Default effort level passed as `--effort` to the Claude CLI. One of `low`, `medium`, `high`, `xhigh`, `max`. Per-chat override via `/effort`. |
+| `CLAUDE_BRIDGE_MODEL` | `haiku` | Default model passed as `--model` to the Claude CLI. One of `opus`, `sonnet`, `haiku`. Per-chat override via `/model`. Haiku is the default to keep costs low. |
 
 After editing `.env`, reload with `launchctl kickstart -k gui/$UID/com.local.claude-bridge`.
 
