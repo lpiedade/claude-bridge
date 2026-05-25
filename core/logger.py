@@ -25,6 +25,14 @@ _FMT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _CONV_FMT = "%(asctime)s %(message)s"
 
 
+def _resolve_level(default: int = logging.INFO) -> int:
+    raw = os.environ.get("CLAUDE_BRIDGE_LOG_LEVEL")
+    if not raw:
+        return default
+    value = logging.getLevelName(raw.strip().upper())
+    return value if isinstance(value, int) else default
+
+
 def _rotating(path: Path, fmt: str) -> RotatingFileHandler:
     handler = RotatingFileHandler(
         path, maxBytes=_MAX_BYTES, backupCount=_BACKUPS, encoding="utf-8"
@@ -36,8 +44,10 @@ def _rotating(path: Path, fmt: str) -> RotatingFileHandler:
 def configure() -> None:
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+    level = _resolve_level()
+
     root = logging.getLogger()
-    root.setLevel(logging.INFO)
+    root.setLevel(level)
     # Drop any handlers a previous configure() / basicConfig() may have added.
     for h in list(root.handlers):
         root.removeHandler(h)
@@ -50,7 +60,7 @@ def configure() -> None:
 
     # bridge.log: full INFO+ stream, rotated.
     bridge_handler = _rotating(_BRIDGE_LOG, _FMT)
-    bridge_handler.setLevel(logging.INFO)
+    bridge_handler.setLevel(level)
     root.addHandler(bridge_handler)
 
     # Silence chatty third-party loggers.
@@ -59,7 +69,7 @@ def configure() -> None:
 
     # Conversation logger: isolated from root, own rotating file.
     conv = logging.getLogger("claude-bridge.conversation")
-    conv.setLevel(logging.INFO)
+    conv.setLevel(level)
     conv.propagate = False
     for h in list(conv.handlers):
         conv.removeHandler(h)
