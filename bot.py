@@ -24,6 +24,22 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from core.config import (
+    ALLOWED_CHAT_IDS,
+    ALLOWED_CWD_ROOTS,
+    BOT_TOKEN,
+    CLAUDE_BIN,
+    DEFAULT_CWD,
+    DEFAULT_EFFORT,
+    DEFAULT_MODEL,
+    PERMISSION_MODE,
+    TIMEOUT_SECONDS,
+    VALID_EFFORTS,
+    VALID_MODELS,
+    parse_effort as _parse_effort,
+    parse_model as _parse_model,
+)
+from core.logger import configure as _configure_logging, log
 from integrations.claude_client import extract_result_text
 from utils.paths import (
     is_cwd_allowed as _is_cwd_allowed_impl,
@@ -42,54 +58,9 @@ from telegram.ext import (
     filters,
 )
 
-BOT_TOKEN = os.environ["CLAUDE_BRIDGE_TG_TOKEN"]
-ALLOWED_CHAT_IDS = {
-    int(x) for x in os.environ["CLAUDE_BRIDGE_ALLOWED_CHATS"].split(",") if x.strip()
-}
-DEFAULT_CWD = os.path.expanduser(
-    os.environ.get("CLAUDE_BRIDGE_CWD", "~/EDF/Personal/Github")
-)
-ALLOWED_CWD_ROOTS = [
-    Path(os.path.expanduser(p)).resolve()
-    for p in os.environ.get(
-        "CLAUDE_BRIDGE_CWD_ROOTS",
-        "~/EDF/Personal/Github,~/EDF/BlindBet,/tmp",
-    ).split(",")
-    if p.strip()
-]
-CLAUDE_BIN = "/opt/homebrew/bin/claude"
-PERMISSION_MODE = os.environ.get("CLAUDE_BRIDGE_PERMISSION_MODE", "bypassPermissions")
-TIMEOUT_SECONDS = int(os.environ.get("CLAUDE_BRIDGE_TIMEOUT", "600"))
-
-VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
-
-
-def _parse_effort(value: str | None) -> str | None:
-    if not value:
-        return None
-    v = value.strip().lower()
-    return v if v in VALID_EFFORTS else None
-
-
-DEFAULT_EFFORT = _parse_effort(os.environ.get("CLAUDE_BRIDGE_EFFORT")) or "low"
-
-VALID_MODELS = {"opus", "sonnet", "haiku"}
-
-
-def _parse_model(value: str | None) -> str | None:
-    if not value:
-        return None
-    v = value.strip().lower()
-    return v if v in VALID_MODELS else None
-
-
-DEFAULT_MODEL = _parse_model(os.environ.get("CLAUDE_BRIDGE_MODEL")) or "haiku"
-
 STATE_FILE = Path.home() / ".claude-bridge" / "state.json"
 STATE_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 os.chmod(STATE_FILE.parent, 0o700)
-
-log = logging.getLogger("claude-bridge")
 
 if STATE_FILE.exists():
     _mode = STATE_FILE.stat().st_mode & 0o777
@@ -478,10 +449,7 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    _configure_logging()
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
