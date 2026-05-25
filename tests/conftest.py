@@ -47,5 +47,9 @@ def bot_module(tmp_path, monkeypatch):
         del sys.modules["bot"]
     bot = importlib.import_module("bot")
     state_file = tmp_path / "state.json"
+    # STATE_FILE lives in repositories.session_repository now; patch both
+    # so tests that read bot_module.STATE_FILE see the redirected path.
+    repo = importlib.import_module("repositories.session_repository")
+    monkeypatch.setattr(repo, "STATE_FILE", state_file)
     monkeypatch.setattr(bot, "STATE_FILE", state_file)
     return bot

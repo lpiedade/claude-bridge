@@ -28,7 +28,9 @@ def test_default_model_is_haiku(bot_module):
 
 
 def test_new_session_inherits_default_model(bot_module, monkeypatch):
+    import repositories.session_repository as repo
     monkeypatch.setattr(bot_module, "DEFAULT_MODEL", "sonnet")
+    monkeypatch.setattr(repo, "DEFAULT_MODEL", "sonnet")
     info = _run(bot_module.session_for(3001))
     assert info["model"] == "sonnet"
 

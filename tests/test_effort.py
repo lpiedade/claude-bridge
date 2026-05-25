@@ -24,13 +24,17 @@ def test_parse_effort_rejects_invalid(bot_module):
 
 
 def test_new_session_inherits_default_effort(bot_module, monkeypatch):
+    import repositories.session_repository as repo
     monkeypatch.setattr(bot_module, "DEFAULT_EFFORT", "medium")
+    monkeypatch.setattr(repo, "DEFAULT_EFFORT", "medium")
     info = _run(bot_module.session_for(1001))
     assert info["effort"] == "medium"
 
 
 def test_new_session_effort_is_none_without_default(bot_module, monkeypatch):
+    import repositories.session_repository as repo
     monkeypatch.setattr(bot_module, "DEFAULT_EFFORT", None)
+    monkeypatch.setattr(repo, "DEFAULT_EFFORT", None)
     info = _run(bot_module.session_for(1002))
     assert info["effort"] is None
 
