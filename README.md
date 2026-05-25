@@ -9,12 +9,41 @@ Telegram ↔ Claude Code CLI bridge running on the Mac. Lets you talk to the Cla
         ↓
 [Telegram Bot API]
         ↓ (long-poll)
-[bot.py running on the Mac via launchd]
+[python -m app.main on the Mac via launchd]
         ↓ (subprocess)
 [claude -p <prompt> --resume <session-id> --permission-mode bypassPermissions]
 ```
 
 Per-chat state persisted in `~/.claude-bridge/state.json` (session_id + cwd + `started` flag).
+
+### Module layout
+
+```
+app/main.py                       # entrypoint (python -m app.main)
+core/
+├── config.py                     # env-var loading + defaults
+└── logger.py                     # logging setup, shared `log`
+utils/
+├── paths.py                      # resolve_arg, is_cwd_allowed, safe_resolve
+└── redact.py                     # scrub home path / emails / hex / api keys
+integrations/
+└── claude_client.py              # subprocess wrapper + extract_result_text
+repositories/
+└── session_repository.py         # state.json load/save + per-chat session
+service/handlers/
+├── __init__.py                   # register(app) wires all CommandHandlers
+├── _common.py                    # authorized() + 1-arg is_cwd_allowed wrapper
+├── start.py                      # /start, /status
+├── session.py                    # /new
+├── cwd.py                        # /cd, /pwd, /ls
+├── effort.py                     # /effort
+├── model.py                      # /model
+└── message.py                    # free-form text → claude CLI
+run.sh                            # launchd entrypoint (sources .env, execs python -m app.main)
+launchd/                          # versioned plist + install README
+tests/                            # pytest, 56 cases
+pyproject.toml                    # package declaration; `claude-bridge` console script
+```
 
 ## Initial setup
 
@@ -70,7 +99,7 @@ tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
 # Inspect state (loaded? last exit? PID?)
 launchctl print gui/$UID/com.local.claude-bridge
 
-# Restart after editing bot.py or .env
+# Restart after editing code or .env
 launchctl kickstart -k gui/$UID/com.local.claude-bridge
 
 # Stop temporarily (keeps plist on disk)
@@ -124,7 +153,7 @@ After editing `.env`, reload with `launchctl kickstart -k gui/$UID/com.local.cla
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Bot does not reply on Telegram | Service is not running | `launchctl print gui/$UID/com.local.claude-bridge` — if "could not find service", reload |
-| `last exit code` ≠ 0 | Error in `bot.py` or missing `.env` | `tail -50 ~/.claude-bridge/launchd.err` |
+| `last exit code` ≠ 0 | Error in `app/main.py` or missing `.env` | `tail -50 ~/.claude-bridge/launchd.err` |
 | "Unauthorized" reply on Telegram | Your chat_id is not in `ALLOWED_CHATS` | Re-fetch via `@userinfobot`, update `.env`, kickstart |
 | `claude: command not found` in logs | Plist `PATH` does not include `/opt/homebrew/bin` | Check the `EnvironmentVariables` block in the plist |
 | Reply is cut off | Message >4000 chars | Expected — the bot splits into chunks; confirm all arrived |
