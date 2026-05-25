@@ -20,10 +20,17 @@ import asyncio
 import json
 import logging
 import os
-import re
 import subprocess
 import uuid
 from pathlib import Path
+
+from integrations.claude_client import extract_result_text
+from utils.paths import (
+    is_cwd_allowed as _is_cwd_allowed_impl,
+    resolve_arg as _resolve_arg,
+    safe_resolve as _safe_resolve,
+)
+from utils.redact import redact as _redact
 
 from telegram import Update
 from telegram.constants import ChatAction
@@ -91,77 +98,8 @@ if STATE_FILE.exists():
         os.chmod(STATE_FILE, 0o600)
 
 
-def _resolve_arg(arg: str, base_cwd: str) -> str:
-    """Resolve a user-provided path argument with POSIX `cd` semantics.
-
-    - `~` is expanded against the user's home directory.
-    - Absolute paths (post-expansion) are returned unchanged.
-    - Relative paths are joined with `base_cwd` and normalized so that
-      `..` and `.` segments collapse before any allowlist check runs.
-    """
-    arg = os.path.expanduser(arg)
-    if os.path.isabs(arg):
-        return os.path.normpath(arg)
-    return os.path.normpath(os.path.join(base_cwd, arg))
-
-
-_HOME = str(Path.home())
-_REDACT_PATTERNS = [
-    (re.compile(re.escape(_HOME)), "~"),
-    (re.compile(r"/Users/[^/\s]+"), "/Users/<user>"),
-    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "<email>"),
-    (re.compile(r"\b[0-9a-f]{32,}\b"), "<hex>"),
-    (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "<api-key>"),
-]
-
-
-def _redact(s: str) -> str:
-    for pat, repl in _REDACT_PATTERNS:
-        s = pat.sub(repl, s)
-    return s
-
-
-def extract_result_text(stdout: str) -> str:
-    """Pull the `result` field from `claude --output-format json` stdout.
-
-    Accepts both shapes the CLI may emit (single object, or a list of events)
-    and falls back to the raw stdout when no `result` is found.
-    """
-    try:
-        payload = json.loads(stdout)
-    except json.JSONDecodeError:
-        return stdout
-    if isinstance(payload, dict):
-        return payload.get("result", stdout)
-    if isinstance(payload, list):
-        for item in reversed(payload):
-            if isinstance(item, dict) and "result" in item:
-                return item["result"]
-    return stdout
-
-
-def _safe_resolve(path: str) -> str:
-    """Best-effort resolve for logging; never raises."""
-    try:
-        return str(Path(os.path.expanduser(path)).resolve(strict=False))
-    except (OSError, RuntimeError):
-        return path
-
-
 def is_cwd_allowed(path: str) -> bool:
-    """Check that `path` exists and resolves under one of ALLOWED_CWD_ROOTS.
-
-    Uses strict resolution so symlinks pointing outside the allowlist are
-    rejected (a symlinked dir resolves to its real target before the check).
-    """
-    try:
-        resolved = Path(os.path.expanduser(path)).resolve(strict=True)
-    except (OSError, RuntimeError):
-        return False
-    return any(
-        resolved == root or root in resolved.parents
-        for root in ALLOWED_CWD_ROOTS
-    )
+    return _is_cwd_allowed_impl(path, ALLOWED_CWD_ROOTS)
 
 
 if not is_cwd_allowed(DEFAULT_CWD):
