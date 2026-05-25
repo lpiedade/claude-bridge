@@ -38,6 +38,7 @@ service/handlers/
 ├── cwd.py                        # /cd, /pwd, /ls
 ├── effort.py                     # /effort
 ├── model.py                      # /model
+├── context.py                    # /context
 └── message.py                    # free-form text → claude CLI
 run.sh                            # launchd entrypoint (sources .env, execs python -m app.main)
 launchd/                          # versioned plist + install README
@@ -91,6 +92,7 @@ tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
 | `/effort high` | Set effort for this chat. Valid: `low`, `medium`, `high`, `xhigh`, `max`, `none` (clears override) |
 | `/model` | Show the model for this chat and the default |
 | `/model opus` | Set model for this chat. Valid: `opus`, `sonnet`, `haiku`, `default` (resets to `CLAUDE_BRIDGE_MODEL`/`haiku`) |
+| `/context` | Render a PNG mirroring Claude Code's `/context` view (10×20 grid + per-category breakdown: System prompt, System tools, MCP tools, Memory files, Skills, Messages, Free space, Autocompact buffer). Invokes `claude --resume <sid> -p "/context"`, which runs synthetically — `num_turns=0`, no token cost. |
 | `<any text>` | Send as a prompt to Claude Code |
 
 ## Management (launchd)
