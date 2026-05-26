@@ -1,6 +1,7 @@
 """/cd, /pwd, /ls — working-directory commands."""
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from telegram import Update
@@ -28,7 +29,7 @@ async def cmd_pwd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     try:
         info = await session_for(update.effective_chat.id)
-        await update.message.reply_text(info["cwd"])
+        await update.effective_message.reply_text(info["cwd"])
     finally:
         await set_last_update_id(update.update_id)
 
@@ -42,11 +43,11 @@ async def cmd_cd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         info = await session_for(chat_id)
         if not ctx.args:
-            await update.message.reply_text(f"CWD: {info['cwd']}")
+            await update.effective_message.reply_text(f"CWD: {info['cwd']}")
             return
         new_cwd = resolve_arg(ctx.args[0], info["cwd"])
         if not Path(new_cwd).is_dir():
-            await update.message.reply_text(f"Not a directory: {new_cwd}")
+            await update.effective_message.reply_text(f"Not a directory: {new_cwd}")
             return
         if not is_cwd_allowed(new_cwd):
             log.warning(
@@ -57,12 +58,21 @@ async def cmd_cd(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 [str(r) for r in ALLOWED_CWD_ROOTS],
             )
             allowed = ", ".join(str(r) for r in ALLOWED_CWD_ROOTS)
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"Path not in allowed roots: {new_cwd}\nAllowed: {allowed}"
             )
             return
-        info = await update_session(chat_id, cwd=new_cwd)
-        await update.message.reply_text(f"CWD: {info['cwd']}")
+        # Claude CLI binds a session to its origin cwd; --resume from a
+        # different directory fails with "No conversation found".
+        info = await update_session(
+            chat_id,
+            cwd=new_cwd,
+            session_id=str(uuid.uuid4()),
+            started=False,
+        )
+        await update.effective_message.reply_text(
+            f"CWD: {info['cwd']}\nNew session: {info['session_id']}"
+        )
     finally:
         await set_last_update_id(update.update_id)
 
@@ -77,7 +87,7 @@ async def cmd_ls(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         info = await session_for(chat_id)
         target = resolve_arg(ctx.args[0], info["cwd"]) if ctx.args else info["cwd"]
         if not Path(target).is_dir():
-            await update.message.reply_text(f"Not a directory: {target}")
+            await update.effective_message.reply_text(f"Not a directory: {target}")
             return
         if not is_cwd_allowed(target):
             log.warning(
@@ -88,7 +98,7 @@ async def cmd_ls(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 [str(r) for r in ALLOWED_CWD_ROOTS],
             )
             allowed = ", ".join(str(r) for r in ALLOWED_CWD_ROOTS)
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"Path not in allowed roots: {target}\nAllowed: {allowed}"
             )
             return
@@ -98,10 +108,10 @@ async def cmd_ls(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 key=lambda p: (p.is_file(), p.name.lower()),
             )
         except PermissionError:
-            await update.message.reply_text(f"Permission denied: {target}")
+            await update.effective_message.reply_text(f"Permission denied: {target}")
             return
         if not entries:
-            await update.message.reply_text(f"{target}\n(empty)")
+            await update.effective_message.reply_text(f"{target}\n(empty)")
             return
         n_dirs = sum(1 for e in entries if e.is_dir())
         n_files = len(entries) - n_dirs
@@ -112,6 +122,6 @@ async def cmd_ls(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             lines.append(f"{e.name}{suffix}")
         if len(entries) > LS_MAX_ENTRIES:
             lines.append(f"... ({len(entries) - LS_MAX_ENTRIES} more)")
-        await update.message.reply_text("\n".join(lines))
+        await update.effective_message.reply_text("\n".join(lines))
     finally:
         await set_last_update_id(update.update_id)

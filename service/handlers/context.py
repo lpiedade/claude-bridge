@@ -51,7 +51,7 @@ async def cmd_context(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         info = await session_for(chat_id)
 
         if not info.get("started"):
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"Session not started yet (id={info['session_id']}).\n"
                 f"Send a message first, then /context."
             )
@@ -68,21 +68,21 @@ async def cmd_context(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 timeout=min(TIMEOUT_SECONDS, 30),
             )
         except subprocess.TimeoutExpired:
-            await update.message.reply_text("Timed out querying /context.")
+            await update.effective_message.reply_text("Timed out querying /context.")
             return
         except Exception as exc:
             log.exception("fetch_context failed chat=%s", chat_id)
-            await update.message.reply_text(f"Failed to query /context: {exc}")
+            await update.effective_message.reply_text(f"Failed to query /context: {exc}")
             return
 
         try:
             png = await asyncio.to_thread(render_context_png, usage)
         except Exception:
             log.exception("render_context_png failed chat=%s", chat_id)
-            await update.message.reply_text(_text_fallback(usage))
+            await update.effective_message.reply_text(_text_fallback(usage))
             return
 
-        await update.message.reply_photo(photo=png, caption=_caption(usage))
+        await update.effective_message.reply_photo(photo=png, caption=_caption(usage))
     finally:
         await set_last_update_id(update.update_id)
 

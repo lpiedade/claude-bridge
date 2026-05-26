@@ -52,14 +52,14 @@ def _format_denial(denial: dict) -> str:
 
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
-        await update.message.reply_text("Unauthorized.")
+        await update.effective_message.reply_text("Unauthorized.")
         return
     if not await claim_update(update):
         return
     chat_id = update.effective_chat.id
     try:
         info = await session_for(chat_id)
-        prompt = update.message.text or ""
+        prompt = update.effective_message.text or ""
         if not prompt.strip():
             return
 
@@ -87,7 +87,7 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except subprocess.TimeoutExpired:
             log.warning("claude timeout chat=%s session=%s", chat_id, info["session_id"])
-            await update.message.reply_text(f"Timed out after {TIMEOUT_SECONDS}s.")
+            await update.effective_message.reply_text(f"Timed out after {TIMEOUT_SECONDS}s.")
             return
 
         if result.returncode != 0:
@@ -98,7 +98,7 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             )
             err_safe = redact(err_full)
             last_line = err_safe.splitlines()[-1] if err_safe else "(no stderr)"
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"Claude exited with rc={result.returncode}.\n"
                 f"Last line: {last_line[:500]}\n"
                 f"Full stderr in bridge.log"
@@ -124,7 +124,7 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             body = "\n".join(_format_denial(d) for d in denials)
             notice = f"{header}\n{body}"
             for i in range(0, len(notice), 4000):
-                await update.message.reply_text(notice[i:i + 4000])
+                await update.effective_message.reply_text(notice[i:i + 4000])
 
         text = extract_result_text(result.stdout)
         text = text.strip() or "(no output)"
@@ -135,11 +135,11 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             _truncate(redact(text)),
         )
         for i in range(0, len(text), 4000):
-            await update.message.reply_text(text[i:i + 4000])
+            await update.effective_message.reply_text(text[i:i + 4000])
     except Exception:
         log.exception("unhandled error in on_message chat=%s", chat_id)
         try:
-            await update.message.reply_text("Internal error — check bridge.log.")
+            await update.effective_message.reply_text("Internal error — check bridge.log.")
         except Exception:
             log.exception("failed to send error notice to chat=%s", chat_id)
     finally:

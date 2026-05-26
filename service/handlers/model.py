@@ -24,7 +24,7 @@ async def cmd_model(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         info = await session_for(chat_id)
         if not ctx.args:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"Model: {info.get('model') or '(default)'}\n"
                 f"Default: {config.DEFAULT_MODEL}\n"
                 f"Usage: /model <{'|'.join(sorted(config.VALID_MODELS))}|default>"
@@ -33,15 +33,15 @@ async def cmd_model(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         arg = ctx.args[0].strip().lower()
         if arg == "default":
             info = await update_session(chat_id, model=config.DEFAULT_MODEL)
-            await update.message.reply_text(f"Model: {info['model']} (default)")
+            await update.effective_message.reply_text(f"Model: {info['model']} (default)")
             return
         if arg not in config.VALID_MODELS:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"Invalid model: {arg}. "
                 f"Choose: {', '.join(sorted(config.VALID_MODELS))}, default"
             )
             return
         info = await update_session(chat_id, model=arg)
-        await update.message.reply_text(f"Model: {info['model']}")
+        await update.effective_message.reply_text(f"Model: {info['model']}")
     finally:
         await set_last_update_id(update.update_id)

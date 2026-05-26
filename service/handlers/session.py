@@ -20,6 +20,6 @@ async def cmd_new(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     try:
         info = await reset_session(update.effective_chat.id)
-        await update.message.reply_text(f"New session: {info['session_id']}")
+        await update.effective_message.reply_text(f"New session: {info['session_id']}")
     finally:
         await set_last_update_id(update.update_id)

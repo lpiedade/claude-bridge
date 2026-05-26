@@ -21,7 +21,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     try:
         info = await session_for(update.effective_chat.id)
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "Claude bridge online.\n"
             f"Session: {info['session_id']}\n"
             f"CWD: {info['cwd']}\n"
