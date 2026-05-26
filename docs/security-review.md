@@ -59,7 +59,7 @@ if not Path(new_cwd).is_dir():
 **Impact:** Amplifier for F-01. Removing it does not fix the underlying problem but raises the cost of casual mistakes (a typo turning into a wipe of `~/Library`).
 
 **Remediation:**
-- Enforce an allowlist root via env var (e.g. `CLAUDE_BRIDGE_CWD_ROOTS=~/EDF/Personal/Github,/tmp`) and reject any `new_cwd` whose `Path.resolve()` is not under one of those roots.
+- Enforce an allowlist root via env var (e.g. `CLAUDE_BRIDGE_CWD_ROOTS=~/EDF/Personal/Github`) and reject any `new_cwd` whose `Path.resolve()` is not under one of those roots.
 - Reject paths containing `..` after expansion. Reject if `Path(new_cwd).resolve()` differs from a normalized form (catches symlink escapes).
 
 ### F-03 — State file is written with default umask and may be world-readable  &nbsp;`Severity: High`

@@ -16,6 +16,43 @@ Telegram ↔ Claude Code CLI bridge running on the Mac. Lets you talk to the Cla
 
 Per-chat state persisted in `~/.claude-bridge/state.json` (session_id + cwd + `started` flag).
 
+### Package diagram
+
+```mermaid
+flowchart TD
+    classDef ext fill:#eee,stroke:#999,color:#333
+    classDef pkg fill:#e7f0ff,stroke:#3a6ea5,color:#0b2545
+
+    TG[Telegram Bot API]:::ext
+    CLI[claude CLI]:::ext
+    FS[(~/.claude-bridge/state.json)]:::ext
+
+    app["app<br/><i>entrypoint / wiring</i>"]:::pkg
+    service["service.handlers<br/><i>command + message handlers</i>"]:::pkg
+    integrations["integrations<br/><i>claude subprocess + /context</i>"]:::pkg
+    repositories["repositories<br/><i>per-chat session state</i>"]:::pkg
+    core["core<br/><i>config + logger</i>"]:::pkg
+    utils["utils<br/><i>paths + redact</i>"]:::pkg
+    scripts["scripts<br/><i>cost_alert agent</i>"]:::pkg
+
+    TG <--> app
+    app --> service
+    app --> core
+    service --> integrations
+    service --> repositories
+    service --> core
+    service --> utils
+    integrations --> core
+    integrations --> CLI
+    repositories --> core
+    repositories --> FS
+    scripts --> core
+    scripts --> repositories
+    scripts --> FS
+```
+
+Arrows read as "depends on". `core` and `utils` are leaves — they import nothing else in the project. `app` only wires; all business logic lives in `service.handlers` and `integrations`.
+
 ### Module layout
 
 ```
@@ -152,7 +189,7 @@ Third-party loggers (`httpx`, `httpcore`, `telegram`) are pinned at `WARNING` to
 | `CLAUDE_BRIDGE_TG_TOKEN` | (required) | Token from BotFather |
 | `CLAUDE_BRIDGE_ALLOWED_CHATS` | (required) | Comma-separated numeric `chat_id`s |
 | `CLAUDE_BRIDGE_CWD` | `~/EDF/Personal/Github` | Default working directory for new sessions |
-| `CLAUDE_BRIDGE_CWD_ROOTS` | `~/EDF/Personal/Github,~/EDF/BlindBet,/tmp` | Allowlist of roots `/cd` may switch into (comma-separated). `DEFAULT_CWD` must be under one of these or the bot refuses to start. Symlinks are resolved before the check. |
+| `CLAUDE_BRIDGE_CWD_ROOTS` | `~/EDF/Personal/Github,~/EDF/BlindBet` | Allowlist of roots `/cd` may switch into (comma-separated). `DEFAULT_CWD` must be under one of these or the bot refuses to start. Symlinks are resolved before the check. |
 | `CLAUDE_BRIDGE_PERMISSION_MODE` | `acceptEdits` | See "Security" and "Permission notifications" below. Valid: `default`, `acceptEdits`, `plan`, `bypassPermissions`, `auto`, `dontAsk`. |
 | `CLAUDE_BRIDGE_TIMEOUT` | `600` | Per-message timeout in seconds |
 | `CLAUDE_BRIDGE_EFFORT` | (unset) | Default effort level passed as `--effort` to the Claude CLI. One of `low`, `medium`, `high`, `xhigh`, `max`. Per-chat override via `/effort`. |
@@ -160,7 +197,7 @@ Third-party loggers (`httpx`, `httpcore`, `telegram`) are pinned at `WARNING` to
 | `CLAUDE_BRIDGE_LOG_LEVEL` | `INFO` | App-log level for `bridge.log` / `conversation.log`. One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. `launchd.err` stays pinned at `WARNING`. See "Logs" above. |
 | `COST_ALERT_ENABLED` | `true` | Enable the hourly cost-alert agent. See "Cost Alert" below. |
 | `COST_ALERT_THRESHOLD_USD` | `10` | Trigger an email when any tracked session's transcript cost exceeds this value. |
-| `COST_ALERT_RECIPIENT` | `leonardo.piedade@accenture.com` | Recipient address for alerts (sent via Mail.app). |
+| `COST_ALERT_RECIPIENT` | `leoabrahao@gmail.com` | Recipient address for alerts (sent via Mail.app). |
 | `COST_ALERT_INTERVAL_SECONDS` | `3600` | Polling interval used by the launchd plist; also the dedupe window. |
 
 After editing `.env`, reload with `launchctl kickstart -k gui/$UID/com.local.claude-bridge`.

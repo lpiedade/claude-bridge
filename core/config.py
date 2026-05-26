@@ -15,7 +15,7 @@ ALLOWED_CWD_ROOTS = [
     Path(os.path.expanduser(p)).resolve()
     for p in os.environ.get(
         "CLAUDE_BRIDGE_CWD_ROOTS",
-        "~/EDF/Personal/Github,~/EDF/BlindBet,/tmp",
+        "~/EDF/Personal/Github,~/EDF/BlindBet",
     ).split(",")
     if p.strip()
 ]
@@ -54,7 +54,7 @@ def _parse_bool(value: str | None, default: bool) -> bool:
 COST_ALERT_ENABLED = _parse_bool(os.environ.get("COST_ALERT_ENABLED"), True)
 COST_ALERT_THRESHOLD_USD = float(os.environ.get("COST_ALERT_THRESHOLD_USD", "10"))
 COST_ALERT_RECIPIENT = os.environ.get(
-    "COST_ALERT_RECIPIENT", "leonardo.piedade@accenture.com"
+    "COST_ALERT_RECIPIENT", "leoabrahao@gmail.com"
 )
 COST_ALERT_INTERVAL_SECONDS = int(
     os.environ.get("COST_ALERT_INTERVAL_SECONDS", "3600")
