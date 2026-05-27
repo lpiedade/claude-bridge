@@ -118,23 +118,29 @@ tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
 
 ## Bot commands (in Telegram)
 
-| Command | Function |
-|---|---|
-| `/start` | Show current session_id, cwd, and permission mode |
-| `/status` | Alias for `/start` |
-| `/new` | Generate a new session_id (clears conversation memory) |
-| `/cd` | Show the current working directory |
-| `/cd ~/EDF/BlindBet` | Change the working directory |
-| `/pwd` | Print the current working directory |
-| `/ls` | List entries in the current cwd |
-| `/ls ~/EDF/BlindBet` | List entries in a path (must be inside an allowed root) |
-| `/effort` | Show the effort level for this chat (or `(default)` if unset) |
-| `/effort high` | Set effort for this chat. Valid: `low`, `medium`, `high`, `xhigh`, `max`, `none` (clears override) |
-| `/model` | Show the model for this chat and the default |
-| `/model opus` | Set model for this chat. Valid: `opus`, `sonnet`, `haiku`, `default` (resets to `CLAUDE_BRIDGE_MODEL`/`haiku`) |
-| `/context` | Render a PNG mirroring Claude Code's `/context` view (10×20 grid + per-category breakdown: System prompt, System tools, MCP tools, Memory files, Skills, Messages, Free space, Autocompact buffer). Invokes `claude --resume <sid> -p "/context"`, which runs synthetically — `num_turns=0`, no token cost. |
-| `/usage` | Reply with a PNG line chart of cumulative USD cost over the active session plus a caption (model, turns, input/output/cache tokens, total cost). Reads the local transcript at `~/.claude/projects/<encoded-cwd>/<sid>.jsonl`; no Claude CLI invocation, no token spend. Cost is computed locally from token counts × Anthropic public list prices (see `integrations/claude_pricing.py`). |
-| `<any text>` | Send as a prompt to Claude Code |
+The **Cost** column distinguishes commands that invoke the Claude CLI (and therefore consume tokens / time on your Anthropic subscription) from purely local ones that only read or mutate bot state.
+
+- 🟢 **Local** — pure bot logic; no CLI invocation, no token spend, no network beyond Telegram.
+- 🟡 **CLI (synthetic)** — invokes `claude` but the call returns `num_turns=0` (no model inference is run); negligible cost.
+- 🔴 **CLI (billed)** — invokes `claude` with a real prompt; consumes tokens and counts against your usage/cost window.
+
+| Command | Cost | Function |
+|---|---|---|
+| `/start` | 🟢 Local | Show current session_id, cwd, and permission mode |
+| `/status` | 🟢 Local | Alias for `/start` |
+| `/new` | 🟢 Local | Generate a new session_id (clears conversation memory) |
+| `/cd` | 🟢 Local | Show the current working directory |
+| `/cd ~/EDF/BlindBet` | 🟢 Local | Change the working directory |
+| `/pwd` | 🟢 Local | Print the current working directory |
+| `/ls` | 🟢 Local | List entries in the current cwd |
+| `/ls ~/EDF/BlindBet` | 🟢 Local | List entries in a path (must be inside an allowed root) |
+| `/effort` | 🟢 Local | Show the effort level for this chat (or `(default)` if unset) |
+| `/effort high` | 🟢 Local | Set effort for this chat. Valid: `low`, `medium`, `high`, `xhigh`, `max`, `none` (clears override) |
+| `/model` | 🟢 Local | Show the model for this chat and the default |
+| `/model opus` | 🟢 Local | Set model for this chat. Valid: `opus`, `sonnet`, `haiku`, `default` (resets to `CLAUDE_BRIDGE_MODEL`/`haiku`) |
+| `/context` | 🟡 CLI (synthetic) | Render a PNG mirroring Claude Code's `/context` view (10×20 grid + per-category breakdown: System prompt, System tools, MCP tools, Memory files, Skills, Messages, Free space, Autocompact buffer). Invokes `claude --resume <sid> -p "/context"`, which runs synthetically — `num_turns=0`, no token cost. |
+| `/usage` | 🟢 Local | Reply with a PNG line chart of cumulative USD cost over the active session plus a caption (model, turns, input/output/cache tokens, total cost). Reads the local transcript at `~/.claude/projects/<encoded-cwd>/<sid>.jsonl`; no Claude CLI invocation, no token spend. Cost is computed locally from token counts × Anthropic public list prices (see `integrations/claude_pricing.py`). |
+| `<any text>` | 🔴 CLI (billed) | Send as a prompt to Claude Code. This is the primary cost driver — every plain-text message triggers a `claude -p` run with the configured model and effort; tokens and elapsed time count against your Anthropic usage window. Use `/usage` afterwards to see the cumulative spend on the active session. |
 
 ### `/usage` example
 
