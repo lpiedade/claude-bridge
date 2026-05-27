@@ -76,6 +76,7 @@ service/handlers/
 ├── effort.py                     # /effort
 ├── model.py                      # /model
 ├── context.py                    # /context
+├── usage.py                      # /usage
 └── message.py                    # free-form text → claude CLI
 run.sh                            # launchd entrypoint (sources .env, execs python -m app.main)
 launchd/                          # versioned plist + install README
@@ -130,6 +131,7 @@ tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
 | `/model` | Show the model for this chat and the default |
 | `/model opus` | Set model for this chat. Valid: `opus`, `sonnet`, `haiku`, `default` (resets to `CLAUDE_BRIDGE_MODEL`/`haiku`) |
 | `/context` | Render a PNG mirroring Claude Code's `/context` view (10×20 grid + per-category breakdown: System prompt, System tools, MCP tools, Memory files, Skills, Messages, Free space, Autocompact buffer). Invokes `claude --resume <sid> -p "/context"`, which runs synthetically — `num_turns=0`, no token cost. |
+| `/usage` | Reply with a PNG line chart of cumulative USD cost over the active session plus a caption (model, turns, input/output/cache tokens, total cost). Reads the local transcript at `~/.claude/projects/<encoded-cwd>/<sid>.jsonl`; no Claude CLI invocation, no token spend. Cost is computed locally from token counts × Anthropic public list prices (see `integrations/claude_pricing.py`). |
 | `<any text>` | Send as a prompt to Claude Code |
 
 ## Management (launchd)

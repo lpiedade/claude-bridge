@@ -26,6 +26,7 @@ from core.config import (
     COST_ALERT_RECIPIENT,
     COST_ALERT_THRESHOLD_USD,
 )
+from integrations.claude_pricing import cost_from_usage
 from repositories.session_repository import STATE_FILE
 
 ALERT_STATE_FILE = Path.home() / ".claude-bridge" / "cost-alert-state.json"
@@ -93,15 +94,17 @@ def slug_from_transcript(path: Path) -> str | None:
 
 
 def cost_from_transcript(path: Path) -> float:
-    """Sum per-message ``costUSD`` fields; fall back to max ``total_cost_usd``.
+    """Return total USD cost for a transcript.
 
-    Claude CLI transcripts use both conventions across versions: most rows
-    carry an incremental ``costUSD``, while ``result`` events (when present)
-    carry the cumulative ``total_cost_usd``. We sum the former and take the
-    max of either against the running total to handle both layouts.
+    Older transcripts carry ``costUSD`` (incremental) and/or
+    ``total_cost_usd`` (cumulative on ``result`` events); newer ones only emit
+    ``message.usage`` token counts. We sum incrementals, take the max against
+    any cumulative, and — if both are zero — compute from tokens × model
+    pricing (see :mod:`integrations.claude_pricing`).
     """
     incremental = 0.0
     cumulative_max = 0.0
+    computed = 0.0
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -118,9 +121,15 @@ def cost_from_transcript(path: Path) -> float:
                 cum = _extract_float(obj, ("total_cost_usd",))
                 if cum is not None and cum > cumulative_max:
                     cumulative_max = cum
+                msg = obj.get("message") if isinstance(obj, dict) else None
+                if isinstance(msg, dict):
+                    usage = msg.get("usage")
+                    if isinstance(usage, dict):
+                        computed += cost_from_usage(usage, msg.get("model"))
     except FileNotFoundError:
         return 0.0
-    return max(incremental, cumulative_max)
+    legacy = max(incremental, cumulative_max)
+    return legacy if legacy > 0 else computed
 
 
 def _extract_float(obj, keys: tuple[str, ...]) -> float | None:
