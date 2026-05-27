@@ -666,3 +666,91 @@ Re-run this review when any of the following change:
   is *not* `scripts/install_service.sh` — confirm the substitution happens before
   `plutil -lint` accepts it.
 
+---
+
+# Review #5 — 2026-05-27 (F-01 default flip pass)
+
+**Reviewed:** 2026-05-27
+**Commit Evaluated:** the change that lands this Review #5 (one-line flip in
+`core/config.py` + propagation through `.env.example` and `README.md`).
+**Scope:** the single behavioural change of moving `CLAUDE_BRIDGE_PERMISSION_MODE`'s
+default from `acceptEdits` to `default`. No code path other than the env-var fallback
+in `core/config.py:23` is touched.
+
+**Method:** re-classify F-01 (the dominant residual from every prior review) against
+the new default. Confirm every other finding remains in its prior state. Spot-check
+that nothing in the bot's runtime path silently re-introduces `bypassPermissions`
+when the env var is unset.
+
+## Status of F-01
+
+| ID | Severity | Status (Review #5) | Where verified |
+|---|---|---|---|
+| F-01 | Critical | **Closed (default)** / **Open (opt-in)** | `core/config.py:23` now reads the env var defaulting to `"default"`. New installs and migrations that unset the variable land in `default`. Operators that explicitly set `=bypassPermissions` keep the original Critical posture and are now warned in `.env.example:13-15` and the README "Security" section. |
+
+### F-01 closure rationale
+
+Three preconditions for the closure:
+
+1. **The interactive Approve/Reject flow shipped in Stage 3** (`418c9ce`) makes
+   `default` operationally usable from Telegram — denials become inline buttons
+   instead of dead-ends, so the convenience cost of leaving `bypassPermissions`
+   is gone.
+2. **The flip is a default change, not a code-mode change.** Existing operators
+   running `bypassPermissions` explicitly in their `.env` see no behavioural
+   difference. The trust boundary they accepted is preserved; only fresh installs
+   inherit the safer default.
+3. **The README "Security" section now frames `bypassPermissions` as a power-user
+   opt-in** with the F-01 reference inline, so the docs are honest about what the
+   knob disables.
+
+A Telegram-account compromise still bypasses the buttons (an attacker just clicks
+Approve themselves), so the *theoretical* worst case unchanged for any user who
+chooses `bypassPermissions`. For the default install the worst case drops from
+"any Telegram message is RCE-equivalent" to "any Telegram message requires the
+operator to click Approve on the device displaying the denial." That's the
+delta Stage 3 was designed to capture.
+
+## Carry-over findings (unchanged)
+
+| ID | Severity | Status (Review #5) |
+|---|---|---|
+| F-02 → F-11 | Various | unchanged from Review #4 |
+| F-12 | Low | still Fixed |
+| F-13 | Informational | Open |
+| F-14 | Informational | Open |
+| N-01, N-02 | Informational | Open |
+| N-03 | Informational | Closed |
+| N-04 → N-09 | Informational / Low | unchanged from Review #4 |
+
+## Spot-checks
+
+- `grep -n "PERMISSION_MODE" core/config.py integrations/claude_client.py service/handlers/*.py`
+  confirms `core/config.py:23` is the only fallback site. `integrations/claude_client.py:21`
+  consumes the constant; nothing else writes to it. No fallback path silently re-introduces
+  `bypassPermissions` if the env var is unset.
+- `.env.example` and the README's environment-variable table both list `default` as the
+  documented default. No stale `acceptEdits` literal remains as a fallback in code or docs.
+
+## Quick-win checklist (delta from Review #4)
+
+With F-01 closed for the default install path, the highest-leverage open items are:
+
+1. **N-09** (~3 lines in `cost_alert.send_email`) — escape `recipient` like the other fields.
+2. **N-01** (~5 lines in `service/handlers/start.py`) — collapse `cmd_status`/`cmd_start`
+   into a shared private helper.
+3. **F-13** (~10 lines in `service/handlers/message.py`) — enforce an upper bound on
+   `prompt` length to bound `ARG_MAX` and Claude context expansion.
+
+## Re-review trigger (additive)
+
+In addition to all prior triggers, re-run this review when:
+
+- `core/config.py:23` ever changes its default back toward `bypassPermissions`.
+- A new operator path emerges that can set `PERMISSION_MODE` outside the env var
+  (e.g. a `/permission-mode` slash command for the bot itself) — re-evaluate the
+  per-chat trust boundary there.
+- `service/handlers/approval.py` is extended to grant tools beyond the exact denied
+  invocation — that would re-widen F-01 in a way the operator may not expect.
+
+

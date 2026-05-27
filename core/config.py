@@ -20,7 +20,7 @@ ALLOWED_CWD_ROOTS = [
     if p.strip()
 ]
 CLAUDE_BIN = "/opt/homebrew/bin/claude"
-PERMISSION_MODE = os.environ.get("CLAUDE_BRIDGE_PERMISSION_MODE", "acceptEdits")
+PERMISSION_MODE = os.environ.get("CLAUDE_BRIDGE_PERMISSION_MODE", "default")
 TIMEOUT_SECONDS = int(os.environ.get("CLAUDE_BRIDGE_TIMEOUT", "600"))
 
 VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}

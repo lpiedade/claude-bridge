@@ -11,7 +11,7 @@ Telegram ↔ Claude Code CLI bridge running on the Mac. Lets you talk to the Cla
         ↓ (long-poll)
 [python -m app.main on the Mac via launchd]
         ↓ (subprocess)
-[claude -p <prompt> --resume <session-id> --permission-mode acceptEdits]
+[claude -p <prompt> --resume <session-id> --permission-mode default]
 ```
 
 Per-chat state persisted in `~/.claude-bridge/state.json` (session_id + cwd + `started` flag).
@@ -206,7 +206,7 @@ Third-party loggers (`httpx`, `httpcore`, `telegram`) are pinned at `WARNING` to
 | `CLAUDE_BRIDGE_ALLOWED_CHATS` | (required) | Comma-separated numeric `chat_id`s |
 | `CLAUDE_BRIDGE_CWD` | `~/EDF/Personal/Github` | Default working directory for new sessions |
 | `CLAUDE_BRIDGE_CWD_ROOTS` | `~/EDF/Personal/Github,~/EDF/BlindBet` | Allowlist of roots `/cd` may switch into (comma-separated). `DEFAULT_CWD` must be under one of these or the bot refuses to start. Symlinks are resolved before the check. |
-| `CLAUDE_BRIDGE_PERMISSION_MODE` | `acceptEdits` | See "Security" and "Permission notifications" below. Valid: `default`, `acceptEdits`, `plan`, `bypassPermissions`, `auto`, `dontAsk`. |
+| `CLAUDE_BRIDGE_PERMISSION_MODE` | `default` | See "Security" and "Permission notifications" below. Valid: `default`, `acceptEdits`, `plan`, `bypassPermissions`, `auto`, `dontAsk`. |
 | `CLAUDE_BRIDGE_TIMEOUT` | `600` | Per-message timeout in seconds |
 | `CLAUDE_BRIDGE_EFFORT` | (unset) | Default effort level passed as `--effort` to the Claude CLI. One of `low`, `medium`, `high`, `xhigh`, `max`. Per-chat override via `/effort`. |
 | `CLAUDE_BRIDGE_MODEL` | `haiku` | Default model passed as `--model` to the Claude CLI. One of `opus`, `sonnet`, `haiku`. Per-chat override via `/model`. Haiku is the default to keep costs low. |
@@ -223,9 +223,9 @@ After editing `.env`, reload with `launchctl kickstart -k gui/$UID/com.local.cla
 ## Security
 
 - **Chat allowlist** — only chats in `CLAUDE_BRIDGE_ALLOWED_CHATS` get replies; everyone else sees "Unauthorized".
-- **Permission mode** — defaults to `acceptEdits`: Claude can edit files inside `cwd` automatically, but shell commands and other sensitive tool calls are denied (and surfaced — see below). Override to `bypassPermissions` only if you need fully unattended execution; that disables all guards and Claude can run arbitrary shell commands.
+- **Permission mode** — defaults to `default`: Claude denies every Bash/Edit/Write call by default and the bridge surfaces the denial with **✅ Approve & retry** / **❌ Reject** inline buttons (see "Permission notifications"). `acceptEdits` is a less strict middle ground that auto-passes Edits but still gates Bash. `bypassPermissions` is a power-user opt-in that disables all guards and lets Claude run arbitrary shell commands — only use it when you accept that a Telegram-side compromise becomes equivalent to host RCE (F-01 in `docs/security-review.md`).
   - Keep `cwd` in a safe directory (not `$HOME` root).
-  - Migrating from a previous install: existing `.env` files that still set `CLAUDE_BRIDGE_PERMISSION_MODE=bypassPermissions` keep working as before. Unset the variable to pick up the new `acceptEdits` default.
+  - Migrating from a previous install: existing `.env` files that still set `CLAUDE_BRIDGE_PERMISSION_MODE=acceptEdits` or `=bypassPermissions` keep working as-is. Unset the variable to pick up the new `default` default.
 - **Token and chat_id in `.env`** — chmod 600. Never commit to git.
 
 ## Permission notifications
