@@ -134,6 +134,12 @@ tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
 | `/usage` | Reply with a PNG line chart of cumulative USD cost over the active session plus a caption (model, turns, input/output/cache tokens, total cost). Reads the local transcript at `~/.claude/projects/<encoded-cwd>/<sid>.jsonl`; no Claude CLI invocation, no token spend. Cost is computed locally from token counts × Anthropic public list prices (see `integrations/claude_pricing.py`). |
 | `<any text>` | Send as a prompt to Claude Code |
 
+### `/usage` example
+
+<img src="docs/images/screenshot-telegram-usage-command.jpeg" alt="/usage in Telegram showing a cumulative cost line chart and a textual breakdown" width="360">
+
+The chart on top is the cumulative USD spend for the active session over time. The caption underneath summarises the current model, turn count, token usage split by category (input · output · cache read/write), and total cost.
+
 ## Management (launchd)
 
 ```bash
