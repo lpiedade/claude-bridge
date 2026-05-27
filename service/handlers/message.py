@@ -6,7 +6,7 @@ import json
 import subprocess
 import time
 
-from telegram import Message, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.constants import ChatAction
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
@@ -30,7 +30,9 @@ from repositories.session_repository import (
 )
 from utils.redact import redact
 
+from . import _approvals
 from ._common import authorized
+from .approval import make_callback_data
 
 _MAX_LOG = 4000
 
@@ -176,14 +178,23 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                     d.get("tool_name", "?"),
                     _truncate(redact(json.dumps(d.get("tool_input", {}), ensure_ascii=False))),
                 )
+            token = _approvals.register(chat_id, prompt, denials)
             header = (
-                f"⚠️ Claude pediu permissão para {len(denials)} ação(ões) "
-                f"e foi bloqueado (modo: acceptEdits):"
+                f"⚠️ Claude pediu permissão para {len(denials)} ação(ões):"
             )
             body = "\n".join(_format_denial(d) for d in denials)
             notice = f"{header}\n{body}"
-            for i in range(0, len(notice), 4000):
-                await update.effective_message.reply_text(notice[i:i + 4000])
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Approve & retry", callback_data=make_callback_data(token, "approve")),
+                InlineKeyboardButton("❌ Reject", callback_data=make_callback_data(token, "reject")),
+            ]])
+            # Telegram limits message body to 4096; send any overflow as plain text
+            # and only attach the keyboard to the last chunk.
+            chunks = [notice[i:i + 4000] for i in range(0, len(notice), 4000)] or [notice]
+            for chunk in chunks[:-1]:
+                await update.effective_message.reply_text(chunk)
+            await update.effective_message.reply_text(chunks[-1], reply_markup=keyboard)
+            return
 
         text = extract_result_text(result.stdout)
         text = text.strip() or "(no output)"

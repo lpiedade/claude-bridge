@@ -224,10 +224,12 @@ After editing `.env`, reload with `launchctl kickstart -k gui/$UID/com.local.cla
 
 In modes other than `bypassPermissions`, the Claude CLI denies any tool call that lacks pre-granted permission (e.g. `Bash`, writes outside `cwd`). The bridge surfaces every such denial in two places:
 
-- A Telegram reply prefixed `⚠️ Claude pediu permissão para N ação(ões) e foi bloqueado (modo: acceptEdits):` listing the `tool_name` and a truncated, redacted preview of `tool_input` (one bullet per denial). Sent before the regular result message so the user sees both.
+- A Telegram reply prefixed `⚠️ Claude pediu permissão para N ação(ões):` listing the `tool_name` and a truncated, redacted preview of `tool_input` (one bullet per denial), with inline **✅ Approve & retry** / **❌ Reject** buttons attached.
 - One line per denial appended to `~/.claude-bridge/permissions.log` (audit trail, also redacted/truncated).
 
-Today the flow is one-way (notification only) — there is no Sim/Não button to grant permission in-turn. If you need that, switch the chat to a project where the edit is auto-allowed, or re-run with `CLAUDE_BRIDGE_PERMISSION_MODE=bypassPermissions` temporarily.
+**Approve & retry** re-invokes the Claude CLI on the same session, augmenting `--allowedTools` with the exact denied tool calls (`Bash(<command>)` for Bash, the bare tool name for the rest), and posts the new result back to the chat. **Reject** discards the parked prompt with a confirmation. Pending approvals expire after 30 minutes; expired buttons report "Request expired or already handled." A second-round denial aborts rather than looping.
+
+Use `CLAUDE_BRIDGE_PERMISSION_MODE=bypassPermissions` only when you want fully unattended execution — that disables the prompt entirely and Claude can run arbitrary shell commands without confirmation.
 
 ## Cost Alert
 

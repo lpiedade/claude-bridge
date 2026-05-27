@@ -1,8 +1,15 @@
 """Wire all Telegram command/message handlers onto the Application."""
 from __future__ import annotations
 
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
+from .approval import CALLBACK_PREFIX, cmd_approval
 from .context import cmd_context
 from .cwd import cmd_cd, cmd_ls, cmd_pwd
 from .effort import cmd_effort
@@ -24,4 +31,5 @@ def register(app: Application) -> None:
     app.add_handler(CommandHandler("model", cmd_model))
     app.add_handler(CommandHandler("context", cmd_context))
     app.add_handler(CommandHandler("usage", cmd_usage))
+    app.add_handler(CallbackQueryHandler(cmd_approval, pattern=rf"^{CALLBACK_PREFIX}:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))

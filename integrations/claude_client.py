@@ -14,6 +14,7 @@ def build_command(
     effort: str | None,
     model: str | None,
     started: bool,
+    allowed_tools: list[str] | None = None,
 ) -> list[str]:
     cmd = [
         CLAUDE_BIN,
@@ -25,6 +26,8 @@ def build_command(
         cmd += ["--effort", effort]
     if model:
         cmd += ["--model", model]
+    if allowed_tools:
+        cmd += ["--allowedTools", *allowed_tools]
     if started:
         cmd += ["--resume", session_id]
     else:
@@ -41,10 +44,12 @@ def run_claude(
     model: str | None,
     started: bool,
     timeout: int = TIMEOUT_SECONDS,
+    allowed_tools: list[str] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = build_command(
         prompt, session_id,
         effort=effort, model=model, started=started,
+        allowed_tools=allowed_tools,
     )
     return subprocess.run(
         cmd,
