@@ -5,12 +5,12 @@ import io
 import math
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 
 from integrations.claude_context import ContextUsage
-
 
 # Color per category. Free space and Autocompact get special rendering.
 _CATEGORY_COLORS: dict[str, str] = {
@@ -47,7 +47,6 @@ def _model_display_name(model_id: str) -> str:
 def render_context_png(usage: ContextUsage, *, grid_cols: int = 10, grid_rows: int = 20) -> bytes:
     """Return PNG bytes for the given context usage."""
     total_cells = grid_cols * grid_rows
-    tokens_per_cell = usage.total / total_cells if usage.total else 1
 
     # Build a flat list of cells, one entry per category in declared order.
     ordered: list[tuple[str, float, int]] = []
@@ -59,9 +58,14 @@ def render_context_png(usage: ContextUsage, *, grid_cols: int = 10, grid_rows: i
 
     # Assign each category an integer count of cells proportional to its pct.
     raw = [(name, max(0.0, pct) * total_cells / 100, tokens) for name, pct, tokens in ordered]
-    cells_per_cat = [(name, int(math.floor(c)), pct, tokens) for (name, c, tokens), pct in zip(
-        [(n, v, t) for n, v, t in raw], [p for _, p, _ in ordered]
-    )]
+    cells_per_cat = [
+        (name, int(math.floor(c)), pct, tokens)
+        for (name, c, tokens), pct in zip(
+            [(n, v, t) for n, v, t in raw],
+            [p for _, p, _ in ordered],
+            strict=True,
+        )
+    ]
     # Distribute leftover cells to the largest remainders so totals match `total_cells`.
     used_cells = sum(c for _, c, _, _ in cells_per_cat)
     leftover = total_cells - used_cells

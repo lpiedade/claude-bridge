@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 
 def resolve_arg(arg: str, base_cwd: str) -> str:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -122,14 +122,14 @@ def test_should_notify_first_time(tmp_path):
 
 
 def test_should_notify_blocks_same_hour():
-    now = datetime(2026, 5, 25, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 25, 14, 30, tzinfo=UTC)
     state = {"sid-1": cost_alert.hour_key(now)}
     assert cost_alert.should_notify("sid-1", state, now) is False
 
 
 def test_should_notify_allows_next_hour():
-    earlier = datetime(2026, 5, 25, 14, 30, tzinfo=timezone.utc)
-    later = datetime(2026, 5, 25, 15, 5, tzinfo=timezone.utc)
+    earlier = datetime(2026, 5, 25, 14, 30, tzinfo=UTC)
+    later = datetime(2026, 5, 25, 15, 5, tzinfo=UTC)
     state = {"sid-1": cost_alert.hour_key(earlier)}
     assert cost_alert.should_notify("sid-1", state, later) is True
 
@@ -218,7 +218,7 @@ def test_run_above_threshold_sends_email(tmp_path):
 def test_run_dedupes_within_same_hour(tmp_path):
     state_file, projects_dir, alert_state_file = _setup(tmp_path, 50.0)
     sent, mailer = _fake_mailer()
-    now = datetime(2026, 5, 25, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 25, 14, 30, tzinfo=UTC)
     n1 = cost_alert.run(
         enabled=True, threshold=10.0, recipient="x@y",
         state_file=state_file, projects_dir=projects_dir,
@@ -237,8 +237,8 @@ def test_run_dedupes_within_same_hour(tmp_path):
 def test_run_resends_next_hour(tmp_path):
     state_file, projects_dir, alert_state_file = _setup(tmp_path, 50.0)
     sent, mailer = _fake_mailer()
-    t1 = datetime(2026, 5, 25, 14, 30, tzinfo=timezone.utc)
-    t2 = datetime(2026, 5, 25, 15, 5, tzinfo=timezone.utc)
+    t1 = datetime(2026, 5, 25, 14, 30, tzinfo=UTC)
+    t2 = datetime(2026, 5, 25, 15, 5, tzinfo=UTC)
     cost_alert.run(
         enabled=True, threshold=10.0, recipient="x@y",
         state_file=state_file, projects_dir=projects_dir,

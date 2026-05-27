@@ -10,7 +10,6 @@ from integrations.claude_context import (
 )
 from integrations.claude_context_render import _model_display_name, render_context_png
 
-
 SAMPLE = """## Context Usage
 
 **Model:** claude-opus-4-7

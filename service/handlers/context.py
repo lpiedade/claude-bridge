@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes
 from core.config import TIMEOUT_SECONDS
 from core.logger import log
 from integrations.claude_context import fetch_context
-from integrations.claude_context_render import render_context_png, _model_display_name
+from integrations.claude_context_render import _model_display_name, render_context_png
 from repositories.session_repository import (
     claim_update,
     session_for,

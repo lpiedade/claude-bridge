@@ -8,7 +8,6 @@ Reject   → confirm in the chat and discard the parked prompt.
 from __future__ import annotations
 
 import asyncio
-import json
 import subprocess
 
 from telegram import Update

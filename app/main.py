@@ -7,7 +7,8 @@ from __future__ import annotations
 from telegram.ext import Application
 
 from core.config import ALLOWED_CHAT_IDS, ALLOWED_CWD_ROOTS, BOT_TOKEN, DEFAULT_CWD
-from core.logger import configure as configure_logging, log
+from core.logger import configure as configure_logging
+from core.logger import log
 from service.handlers import register
 from service.handlers._common import is_cwd_allowed
 

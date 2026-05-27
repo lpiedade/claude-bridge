@@ -13,7 +13,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -167,7 +167,7 @@ def save_alert_state(state: dict, path: Path = ALERT_STATE_FILE) -> None:
 
 
 def hour_key(now: datetime | None = None) -> str:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     return now.strftime("%Y-%m-%d-%H")
 
 

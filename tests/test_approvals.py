@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from integrations.claude_client import build_command
 from service.handlers import _approvals
 from service.handlers._approvals import (

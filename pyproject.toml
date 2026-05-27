@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-bridge"
-version = "0.1.0"
+version = "1.0.0"
 description = "Telegram -> Claude Code bridge (macOS launchd service)"
 requires-python = ">=3.11"
 dependencies = [
@@ -27,3 +27,20 @@ packages = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "strict"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+# E (pycodestyle), F (pyflakes), I (isort), B (bugbear), UP (pyupgrade).
+# Skip E501 — long log lines/docstrings are common; the linter would nag.
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts that bootstrap sys.path before importing app modules must keep
+# imports after the path mutation.
+"scripts/cost_alert.py" = ["E402"]

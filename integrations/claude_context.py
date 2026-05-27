@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 
 from core.config import CLAUDE_BIN, TIMEOUT_SECONDS
 
-
 # Display labels we recognize in the category table (in canonical render order).
 KNOWN_CATEGORIES: tuple[str, ...] = (
     "System prompt",
