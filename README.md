@@ -197,6 +197,8 @@ Third-party loggers (`httpx`, `httpcore`, `telegram`) are pinned at `WARNING` to
 | `CLAUDE_BRIDGE_EFFORT` | (unset) | Default effort level passed as `--effort` to the Claude CLI. One of `low`, `medium`, `high`, `xhigh`, `max`. Per-chat override via `/effort`. |
 | `CLAUDE_BRIDGE_MODEL` | `haiku` | Default model passed as `--model` to the Claude CLI. One of `opus`, `sonnet`, `haiku`. Per-chat override via `/model`. Haiku is the default to keep costs low. |
 | `CLAUDE_BRIDGE_LOG_LEVEL` | `INFO` | App-log level for `bridge.log` / `conversation.log`. One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. `launchd.err` stays pinned at `WARNING`. See "Logs" above. |
+| `CLAUDE_BRIDGE_SLOW_RESPONSE_SECONDS` | `30` | Seconds before the bot posts a "still thinking…" notice for a long-running prompt. The TYPING indicator is refreshed every 4s independently. |
+| `CLAUDE_BRIDGE_SLOW_RESPONSE_UPDATE_INTERVAL` | `15` | Seconds between updates to the "still thinking…" notice (edit-in-place with current elapsed time). |
 | `COST_ALERT_ENABLED` | `true` | Enable the hourly cost-alert agent. See "Cost Alert" below. |
 | `COST_ALERT_THRESHOLD_USD` | `10` | Trigger an email when any tracked session's transcript cost exceeds this value. |
 | `COST_ALERT_RECIPIENT` | `leoabrahao@gmail.com` | Recipient address for alerts (sent via Mail.app). |

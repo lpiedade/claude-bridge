@@ -59,6 +59,12 @@ COST_ALERT_RECIPIENT = os.environ.get(
 COST_ALERT_INTERVAL_SECONDS = int(
     os.environ.get("COST_ALERT_INTERVAL_SECONDS", "3600")
 )
+SLOW_RESPONSE_NOTICE_SECONDS = int(
+    os.environ.get("CLAUDE_BRIDGE_SLOW_RESPONSE_SECONDS", "30")
+)
+SLOW_RESPONSE_UPDATE_INTERVAL_SECONDS = int(
+    os.environ.get("CLAUDE_BRIDGE_SLOW_RESPONSE_UPDATE_INTERVAL", "15")
+)
 CLAUDE_PROJECTS_DIR = Path(
     os.path.expanduser(
         os.environ.get("CLAUDE_PROJECTS_DIR", "~/.claude/projects")
