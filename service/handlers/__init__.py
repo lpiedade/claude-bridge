@@ -13,6 +13,8 @@ from .approval import CALLBACK_PREFIX, cmd_approval
 from .context import cmd_context
 from .cwd import cmd_cd, cmd_ls, cmd_pwd
 from .effort import cmd_effort
+from .export import cmd_export
+from .history import cmd_history
 from .message import on_message
 from .model import cmd_model
 from .session import cmd_new
@@ -31,5 +33,7 @@ def register(app: Application) -> None:
     app.add_handler(CommandHandler("model", cmd_model))
     app.add_handler(CommandHandler("context", cmd_context))
     app.add_handler(CommandHandler("usage", cmd_usage))
+    app.add_handler(CommandHandler("history", cmd_history))
+    app.add_handler(CommandHandler("export", cmd_export))
     app.add_handler(CallbackQueryHandler(cmd_approval, pattern=rf"^{CALLBACK_PREFIX}:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))

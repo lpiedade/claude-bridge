@@ -77,6 +77,9 @@ service/handlers/
 ├── model.py                      # /model
 ├── context.py                    # /context
 ├── usage.py                      # /usage
+├── history.py                    # /history
+├── export.py                     # /export
+├── approval.py                   # Approve/Reject callback for permission denials
 └── message.py                    # free-form text → claude CLI
 run.sh                            # launchd entrypoint (sources .env, execs python -m app.main)
 launchd/                          # versioned plist + install README
@@ -140,6 +143,8 @@ The **Cost** column distinguishes commands that invoke the Claude CLI (and there
 | `/model opus` | 🟢 Local | Set model for this chat. Valid: `opus`, `sonnet`, `haiku`, `default` (resets to `CLAUDE_BRIDGE_MODEL`/`haiku`) |
 | `/context` | 🟡 CLI (synthetic) | Render a PNG mirroring Claude Code's `/context` view (10×20 grid + per-category breakdown: System prompt, System tools, MCP tools, Memory files, Skills, Messages, Free space, Autocompact buffer). Invokes `claude --resume <sid> -p "/context"`, which runs synthetically — `num_turns=0`, no token cost. |
 | `/usage` | 🟢 Local | Reply with a PNG line chart of cumulative USD cost over the active session plus a caption (model, turns, input/output/cache tokens, total cost). Reads the local transcript at `~/.claude/projects/<encoded-cwd>/<sid>.jsonl`; no Claude CLI invocation, no token spend. Cost is computed locally from token counts × Anthropic public list prices (see `integrations/claude_pricing.py`). |
+| `/history` | 🟢 Local | Show the last N operator turns of the active session (default 10, max 50). Each turn renders as a compact block with relative timestamp + truncated prompt + truncated reply, redacted via `utils.redact`. Reads the local transcript; no CLI call. |
+| `/export` | 🟢 Local | Reply with the active session's full transcript as a redacted `.md` document. Header carries model, operator/CLI turn counts, token totals, and total cost; body has one `## Turn N` section per operator turn with **You:** / **Claude:** blocks. Useful for archival or Obsidian import. |
 | `<any text>` | 🔴 CLI (billed) | Send as a prompt to Claude Code. This is the primary cost driver — every plain-text message triggers a `claude -p` run with the configured model and effort; tokens and elapsed time count against your Anthropic usage window. Use `/usage` afterwards to see the cumulative spend on the active session. |
 
 ### `/usage` example
