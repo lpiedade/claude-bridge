@@ -488,3 +488,181 @@ Re-run this review when any of the following change:
 - `VALID_EFFORTS` or `VALID_MODELS` in `core/config.py` are widened, especially to include
   values that contain shell-special characters.
 
+---
+
+# Review #4 — 2026-05-27 (post-Stages-2/3 pass)
+
+**Reviewed:** 2026-05-27
+**Commit Evaluated:** `418c9ce`
+**Scope:** every commit between `3542445` (end of Review #3) and `418c9ce`:
+permission-denial surfacing (`1ba1214`), conversation logging sink (`4f7de4a`), `/context`
+slash command (`aace8ef`), configurable log level (`3f37f5a`), `effective_message` switch
+(`57930ff`), the cost-alert system (`051cce1`), `/usage` command and the `claude_pricing`
+module (`00e8839`), the slow-response keepalive (`f8da3e5`), and the interactive
+Approve/Reject flow added in Stage 3 (`418c9ce`). New code touched: `service/handlers/{approval,context,usage,_approvals}.py`,
+`service/handlers/message.py` (rewrites), `integrations/{claude_context,claude_context_render,claude_usage,claude_usage_render,claude_pricing}.py`,
+`scripts/cost_alert.py` + launchd plist, install/uninstall scripts.
+
+**Method:** re-classify the carry-overs (F-12, F-13, F-14, N-01, N-02, N-03) against the new
+tree; then read each new handler and integration module end-to-end for surface added by the
+Stages 2–3 work, plus the cost-alert system. Same threat model and out-of-scope list as
+Review #1, with one update under "Threat model delta" below.
+
+## Threat model delta
+
+Two pieces of code now widen the trust surface:
+
+1. **`/context` and `/usage` re-invoke the Claude CLI from the bot.** `/context` does so to
+   synthesise the live `/context` slash command (`integrations/claude_context.py:129-164`);
+   `/usage` reads the local transcript instead, so it does *not* invoke the CLI but does
+   parse JSONL with attacker-influenced content if the transcript ever contains crafted rows
+   (out of scope today — only Claude writes there). Both run on the same trust anchor as
+   `/message`: an authorised `chat_id`.
+2. **The cost-alert agent is now an independent launchd job** that reads
+   `~/.claude-bridge/state.json` and every transcript under `~/.claude/projects/*` and sends
+   email via `osascript`. It runs under the user UID with no allowlist concept — it does not
+   accept inputs from Telegram, so the attack surface is local files only.
+
+Both are evaluated below; neither changes the dominant F-01 risk.
+
+## Status of carry-over findings
+
+| ID | Severity | Status (Review #4) | Where verified |
+|---|---|---|---|
+| F-01 | Critical | **Downgraded operationally (still Open in code)** | `core/config.py:23` still defaults to `acceptEdits`; the new Stage 3 inline-approval flow (`418c9ce`) lets the operator keep `default`/`acceptEdits` without losing convenience. The Telegram-2FA mitigation still anchors the residual risk. See **F-01 update** below. |
+| F-12 | Low | **Fixed** | `service/handlers/message.py:68-77` now redacts the prompt and truncates at 4000 chars before writing to `conversation.log`; the `bridge.log` line at `message.py:68-71` still emits `session=<uuid>` in full but no longer co-locates the prompt body. The conversation log is a separate rotating sink (`core/logger.py`). Residual exposure: `session_id` still in plaintext; documented as accepted in the operator-only log path. |
+| F-13 | Informational | Open | No upper-bound check on `prompt` length in `message.py`. Unchanged. |
+| F-14 | Informational | Open | Plist still has no `SoftResourceLimits` / `sandbox-exec`. Now templated with `__HOME__` / `__PROJECT_DIR__` placeholders (Stage 4), but the security envelope is identical. |
+| N-01 | Informational | Open | `cmd_status` still delegates to `cmd_start`; both call `claim_update`. Idempotency of `set_last_update_id` continues to mask the double-claim. Not exploitable; documented technical debt. |
+| N-02 | Informational | Open | `cwd.py` listing of filenames unchanged. |
+| N-03 | Informational | **Closed (by deployment choice)** | Stage 4 added `scripts/install_service.sh` which itself checks `.env` mode before installing the plist, and the plist still calls `run.sh` (which re-checks). The `pyproject.toml` entry point is not referenced by any deployed path. Re-open if that changes. |
+
+### F-01 update (operational downgrade only)
+
+Stage 3 added inline `✅ Approve & retry` / `❌ Reject` buttons in the permission-denial
+notice (`service/handlers/approval.py` + `_approvals.py`). The operator can now keep
+`CLAUDE_BRIDGE_PERMISSION_MODE=default` without giving up the ability to authorise a
+sensitive Bash call from Telegram in-flight. The retry path narrows `--allowedTools` to the
+*exact* denied invocation (`Bash('rm /tmp/x y')` with POSIX shell-quoting in `_approvals.allowed_tool_spec`)
+rather than a pattern, so an approval cannot be widened to a family by accident. Approvals are
+single-use (`claim()` pops the entry on first decode) and TTL'd at 30 minutes. A second-round
+denial aborts instead of looping (`approval.py:124-131`).
+
+Net effect: the operational layer is meaningfully thicker. The compromise vector (Telegram
+account takeover) still bypasses the buttons — an attacker authoring messages from an
+allow-listed chat just clicks Approve themselves — so F-01 stays open in code. Severity is
+unchanged in the threat model; only the cost of running in `default`/`acceptEdits` dropped to
+the point where keeping `bypassPermissions` is no longer the obvious default. Recommendation
+flipped: **flip the default to `default`** in a future commit (not done here to avoid coupling
+Stage 4 with a behavioural change for existing deployments).
+
+## New observations (this pass)
+
+### N-04 — Approval token search space &nbsp;`Severity: Informational`
+
+**Location:** `service/handlers/_approvals.py:42` (`secrets.token_urlsafe(9)`).
+
+**Description:** approval tokens are 9 random bytes (72 bits) urlsafe-encoded. They are not
+cryptographic identifiers per se — the `claim()` lookup compares the chat ID before
+returning the entry, so a guessing attacker would also need to be in the allow-listed chat
+to land on a live token. Even ignoring that, 72 bits is well beyond practical brute force.
+**Not a finding**; recorded so future tightening (e.g. attempting to shorten the callback
+payload) doesn't accidentally drop below 64 bits.
+
+### N-05 — In-memory pending-approval store &nbsp;`Severity: Informational`
+
+**Location:** `service/handlers/_approvals.py:51-83`.
+
+**Description:** the pending-approval store is a module-level dict. It is rebuilt empty on
+every process restart — meaning a denied prompt's buttons become inert after a launchd
+crash + restart. The user sees "Request expired or already handled" if they click. This is
+the desired failure mode (do not silently retry across restarts) and matches the TTL semantics;
+the only concern would be if anyone later moves the store to disk without preserving the
+trust requirement that approved retries only fire for the *same* chat that issued the prompt.
+**No finding today**; documented for re-review trigger.
+
+### N-06 — Inline-keyboard messages persist on Telegram's servers indefinitely &nbsp;`Severity: Informational`
+
+**Location:** `service/handlers/message.py:131-142` (the keyboard send), `approval.py:71-75`
+(the post-decision `edit_message_reply_markup` call).
+
+**Description:** when Approve or Reject runs, the bot removes the keyboard from the *original*
+denial notice but does not delete the message itself. The text body — which includes the
+redacted but still potentially revealing `tool_input` (e.g. a file path) — remains on
+Telegram's servers. Same exposure shape as F-08 (subprocess stderr to chat): info reaches
+Telegram's cloud and any enabled backup. Not exploitable beyond the F-08 envelope; flagged so
+that a future hardening pass treating Telegram as untrusted storage is internally consistent.
+
+### N-07 — `claude_pricing.MODEL_RATES` is fixed at code time &nbsp;`Severity: Informational`
+
+**Location:** `integrations/claude_pricing.py:23-42`.
+
+**Description:** the cost computed by `/usage` and the cost-alert fallback both rely on a
+hard-coded rate table (Opus/Sonnet/Haiku 4.x, Anthropic public list prices as of 2026-05).
+When Anthropic publishes a new model family or revises rates, those numbers diverge silently.
+The fallback (`rates_for` returns `DEFAULT_RATES = MODEL_RATES["haiku-4"]` for unknown ids)
+errs toward under-reporting, which is the right direction for an alert threshold (no spurious
+emails) but the wrong direction for `/usage`'s user-visible total (under-charge surprise).
+**No finding** today; recorded so the next family bump remembers to update the table.
+
+### N-08 — `cost_alert` reads every transcript under `~/.claude/projects/*` &nbsp;`Severity: Informational`
+
+**Location:** `scripts/cost_alert.py:60-66`, `:217-219`.
+
+**Description:** the agent matches transcripts by `glob("*/<session_id>.jsonl")` and reads
+each match in full. A transcript can be hundreds of MB on a long-running session. Memory
+exposure is per-line streaming so the cap is bounded, but the agent does open every state
+file's matched transcript every hour. If `~/.claude/projects` were ever symlinked or used as
+a generic working directory (unusual), the agent would happily traverse the link. Today the
+directory is fully under Claude CLI's control. **No finding**; trigger a re-review if the
+projects directory ever stops being claude-CLI-only.
+
+### N-09 — `osascript` recipient is interpolated into AppleScript without escaping the `@` host parse &nbsp;`Severity: Low`
+
+**Location:** `scripts/cost_alert.py:173-190`.
+
+**Description:** `send_email` formats `subject`, `body`, and `recipient` into an AppleScript
+literal via `.format()`. `subject` and `body` are escaped for quotes and newlines. `recipient`
+is interpolated verbatim — a value containing a stray `"` would break the script. Today
+`recipient` comes from `COST_ALERT_RECIPIENT` (env, operator-controlled), so the only attacker
+is the operator who already controls `.env`. Same trust boundary as F-09. Hardening cost is
+~3 lines (same quote-replace as the other fields). **Recorded as minor-debt**, not blocking.
+
+## Residual risk summary (delta from Review #3)
+
+- **F-01** stays open in code; operational mitigation is now `Approve & retry` + Telegram 2FA.
+  Severity unchanged.
+- **F-12** moved to Fixed.
+- **N-03** moved to Closed.
+- **New (N-04 through N-09)** all Informational or Low — none actionable today; all carry a
+  re-review trigger.
+
+## Quick-win checklist (delta from Review #3)
+
+After this pass, the highest-leverage remaining fixes are:
+
+1. **F-01 default flip** — change `core/config.py:23` to `default` (or document loudly that
+   `bypassPermissions` is now a *power user* opt-in, given Approve buttons exist).
+2. **N-09** (~3 lines in `cost_alert.send_email`) — escape `recipient` like the other fields.
+3. **N-01** (~5 lines in `service/handlers/start.py`) — still the leftover from Review #3.
+
+## Re-review trigger (additive to Reviews #1, #2, #3)
+
+Re-run this review when any of the following change:
+
+- `_approvals._pending` ever moves to disk (durable retry across restart) — confirm the
+  chat-id binding still enforces the trust requirement under restart.
+- `MODEL_RATES` in `claude_pricing.py` is updated for a new Claude family — verify both
+  `/usage` and the cost-alert fallback continue to under-report rather than over-report on
+  unknown model ids.
+- A new permission-denial-handling path is added (e.g. a slash-command equivalent of Approve)
+  — re-evaluate the chat-id binding and TTL there.
+- The cost-alert agent learns to read or write any path outside `~/.claude-bridge/` and
+  `~/.claude/projects/` — re-scope N-08.
+- `service/handlers/approval.py` ever calls `run_claude` with a *broader* `allowed_tools`
+  than the exact denied invocation — that would re-widen F-01 in a way the operator may not
+  expect.
+- The plist's `__PROJECT_DIR__` / `__HOME__` placeholders are referenced from any path that
+  is *not* `scripts/install_service.sh` — confirm the substitution happens before
+  `plutil -lint` accepts it.
+

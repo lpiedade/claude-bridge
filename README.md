@@ -109,10 +109,12 @@ chmod 600 .env
 
 ### 4. Enable as a service (launchd)
 ```bash
-launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.local.claude-bridge.plist
+bash scripts/install_service.sh
 launchctl print gui/$UID/com.local.claude-bridge | head -30
 tail -f ~/.claude-bridge/launchd.err   # ctrl-c to exit
 ```
+
+`install_service.sh` renders the plist's `__PROJECT_DIR__` / `__HOME__` placeholders with the live clone's path and the current user's `$HOME`, lints the rendered plist, copies it under `~/Library/LaunchAgents`, and bootstraps + kickstarts the agent. Re-running it is idempotent. To remove the service (logs/state preserved): `bash scripts/uninstall_service.sh`.
 
 ## Bot commands (in Telegram)
 

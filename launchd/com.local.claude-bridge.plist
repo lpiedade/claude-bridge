@@ -7,18 +7,18 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/leonardo.piedade/EDF/Personal/Github/claude-bridge/run.sh</string>
+        <string>__PROJECT_DIR__/run.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/leonardo.piedade/EDF/Personal/Github/claude-bridge</string>
+    <string>__PROJECT_DIR__</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
-        <string>/Users/leonardo.piedade</string>
+        <string>__HOME__</string>
     </dict>
 
     <key>RunAtLoad</key>
@@ -39,9 +39,9 @@
     <string>Background</string>
 
     <key>StandardOutPath</key>
-    <string>/Users/leonardo.piedade/.claude-bridge/launchd.out</string>
+    <string>__HOME__/.claude-bridge/launchd.out</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/leonardo.piedade/.claude-bridge/launchd.err</string>
+    <string>__HOME__/.claude-bridge/launchd.err</string>
 </dict>
 </plist>

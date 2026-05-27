@@ -6,11 +6,22 @@ macOS.
 ## Install (or reinstall)
 
 ```bash
-cp launchd/com.local.claude-bridge.plist ~/Library/LaunchAgents/
-launchctl bootout gui/$UID ~/Library/LaunchAgents/com.local.claude-bridge.plist 2>/dev/null || true
-launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.local.claude-bridge.plist
-launchctl kickstart gui/$UID/com.local.claude-bridge
+bash scripts/install_service.sh
 ```
+
+The script renders `__PROJECT_DIR__` / `__HOME__` placeholders with the live
+clone's path and the current user's `$HOME`, lints the rendered plist, and
+re-bootstraps the agent. Re-running is idempotent.
+
+## Uninstall
+
+```bash
+bash scripts/uninstall_service.sh
+```
+
+Stops the agent and removes the deployed plist. Logs and state under
+`~/.claude-bridge/` are preserved; delete that directory manually if you want a
+full wipe.
 
 ## Inspect
 
@@ -19,7 +30,3 @@ launchctl print gui/$UID/com.local.claude-bridge
 tail -50 ~/.claude-bridge/launchd.out
 tail -50 ~/.claude-bridge/launchd.err
 ```
-
-The plist references the repo's `run.sh` at its absolute path. If you clone
-the repo elsewhere, edit `ProgramArguments` and `WorkingDirectory` accordingly
-before bootstrapping.
