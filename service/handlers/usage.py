@@ -1,7 +1,11 @@
-"""/usage — show token consumption and cost for the active Claude session.
+"""/usage — token + cost report for the active session, or cross-session aggregates.
 
-Parses the session transcript at ``~/.claude/projects/<cwd>/<sid>.jsonl`` and
-replies with a PNG line chart of cumulative cost + a textual caption.
+  /usage         → PNG line chart of cumulative cost over the active session.
+  /usage day     → stacked bar chart of daily spend across all sessions (14d).
+  /usage week    → stacked bar chart of weekly spend with WoW delta (4 weeks).
+
+The cross-session modes walk every JSONL under `~/.claude/projects/*` and bin
+cost by local date + model family; they do not invoke the Claude CLI.
 """
 from __future__ import annotations
 
@@ -14,6 +18,16 @@ from telegram.ext import ContextTypes
 from core.logger import log
 from integrations.claude_context_render import _model_display_name
 from integrations.claude_usage import SessionUsage, parse_session_usage
+from integrations.claude_usage_agg import (
+    DailyBucket,
+    WeeklyBucket,
+    aggregate_daily,
+    aggregate_weekly,
+)
+from integrations.claude_usage_agg_render import (
+    render_daily_bars_png,
+    render_weekly_bars_png,
+)
 from integrations.claude_usage_render import render_usage_png
 from repositories.session_repository import claim_update, session_for, set_last_update_id
 from scripts.cost_alert import find_transcript
@@ -41,12 +55,84 @@ def _caption(usage: SessionUsage) -> str:
     return "\n".join(lines)
 
 
+def _daily_caption(buckets: list[DailyBucket]) -> str:
+    total = sum(b.total for b in buckets)
+    by_fam: dict[str, float] = {}
+    for b in buckets:
+        for fam, cost in b.cost_by_family.items():
+            by_fam[fam] = by_fam.get(fam, 0.0) + cost
+    fam_breakdown = " · ".join(
+        f"{fam} ${cost:.2f}" for fam, cost in sorted(by_fam.items(), key=lambda kv: -kv[1])
+    ) or "no spend"
+    return (
+        f"📊 Daily spend — {len(buckets)} days\n"
+        f"Total: ${total:.2f}\n"
+        f"By family: {fam_breakdown}"
+    )
+
+
+def _weekly_caption(buckets: list[WeeklyBucket]) -> str:
+    total = sum(b.total for b in buckets)
+    last = buckets[-1].total if buckets else 0.0
+    prev = buckets[-2].total if len(buckets) >= 2 else 0.0
+    if prev > 0:
+        delta = (last - prev) / prev * 100
+        wow = f"WoW: {'▲' if delta >= 0 else '▼'}{abs(delta):.0f}% (${last:.2f} vs ${prev:.2f})"
+    else:
+        wow = f"WoW: no baseline (current: ${last:.2f})"
+    return (
+        f"📊 Weekly spend — last {len(buckets)} weeks\n"
+        f"Total: ${total:.2f}\n"
+        f"{wow}"
+    )
+
+
+async def _serve_daily(update: Update, ctx: ContextTypes.DEFAULT_TYPE, days: int) -> None:
+    chat_id = update.effective_chat.id
+    await ctx.bot.send_chat_action(chat_id, ChatAction.UPLOAD_PHOTO)
+    buckets = await asyncio.to_thread(aggregate_daily, days)
+    try:
+        png = await asyncio.to_thread(render_daily_bars_png, buckets)
+    except Exception:
+        log.exception("render_daily_bars_png failed chat=%s", chat_id)
+        await update.effective_message.reply_text(_daily_caption(buckets))
+        return
+    await update.effective_message.reply_photo(photo=png, caption=_daily_caption(buckets))
+
+
+async def _serve_weekly(update: Update, ctx: ContextTypes.DEFAULT_TYPE, weeks: int) -> None:
+    chat_id = update.effective_chat.id
+    await ctx.bot.send_chat_action(chat_id, ChatAction.UPLOAD_PHOTO)
+    buckets = await asyncio.to_thread(aggregate_weekly, weeks)
+    try:
+        png = await asyncio.to_thread(render_weekly_bars_png, buckets)
+    except Exception:
+        log.exception("render_weekly_bars_png failed chat=%s", chat_id)
+        await update.effective_message.reply_text(_weekly_caption(buckets))
+        return
+    await update.effective_message.reply_photo(photo=png, caption=_weekly_caption(buckets))
+
+
 async def cmd_usage(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not authorized(update):
         return
     if not await claim_update(update):
         return
     try:
+        args = ctx.args or []
+        sub = (args[0].lower() if args else "").strip()
+        if sub == "day":
+            await _serve_daily(update, ctx, days=14)
+            return
+        if sub == "week":
+            await _serve_weekly(update, ctx, weeks=4)
+            return
+        if sub and sub not in ("day", "week"):
+            await update.effective_message.reply_text(
+                "Usage: /usage [day|week]. No arg = current session."
+            )
+            return
+
         chat_id = update.effective_chat.id
         info = await session_for(chat_id)
         sid = info["session_id"]
