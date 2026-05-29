@@ -32,9 +32,7 @@ jobs:
           pip install pytest pytest-asyncio ruff
 
       - name: ruff check
-        run: ruff check . --exclude tests/test_permission_denials.py
+        run: ruff check .
 
       - name: pytest
-        # test_permission_denials has pre-existing MagicMock issues tracked
-        # separately; CI runs the rest to keep the signal clean.
-        run: pytest tests/ -q --ignore=tests/test_permission_denials.py
+        run: pytest tests/ -q
