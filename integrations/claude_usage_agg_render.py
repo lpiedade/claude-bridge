@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from integrations.claude_usage_agg import (
     FAMILIES,
     DailyBucket,
+    MonthlyBucket,
     WeeklyBucket,
 )
 
@@ -116,6 +117,55 @@ def render_weekly_bars_png(buckets: list[WeeklyBucket]) -> bytes:
     ax.set_title(f"Weekly spend — last {len(buckets)} weeks (Mon-Sun)",
                  color=_FG, fontsize=14, weight="bold", loc="left", pad=12)
     ax.set_ylabel("USD per week", color=_MUTED, fontsize=11)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", facecolor=fig.get_facecolor(),
+                bbox_inches="tight", pad_inches=0.3)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def render_monthly_bars_png(buckets: list[MonthlyBucket]) -> bytes:
+    fig, ax = plt.subplots(figsize=(10, 5), dpi=110)
+    fig.patch.set_facecolor(_BG)
+    _setup_axes(ax)
+
+    if not buckets or all(b.total == 0 for b in buckets):
+        ax.text(0.5, 0.5, "No spend in window", color=_MUTED,
+                fontsize=14, ha="center", va="center", transform=ax.transAxes)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    else:
+        labels = [b.month_start.strftime("%b %Y") for b in buckets]
+        x = list(range(len(buckets)))
+        bottoms = [0.0] * len(buckets)
+        for fam in FAMILIES:
+            heights = [b.cost_by_family.get(fam, 0.0) for b in buckets]
+            if not any(heights):
+                continue
+            ax.bar(x, heights, bottom=bottoms,
+                   color=_FAMILY_COLORS[fam], label=fam, width=0.6, edgecolor="none")
+            bottoms = [b + h for b, h in zip(bottoms, heights, strict=True)]
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels)
+        ax.legend(loc="upper left", facecolor=_BG, edgecolor=_SPINE,
+                  labelcolor=_FG, framealpha=0.9)
+
+        # Annotate totals + MoM delta over each bar.
+        for i, b in enumerate(buckets):
+            if b.total <= 0:
+                continue
+            label = f"${b.total:.2f}"
+            if i > 0 and buckets[i - 1].total > 0:
+                delta = (b.total - buckets[i - 1].total) / buckets[i - 1].total * 100
+                arrow = "▲" if delta >= 0 else "▼"
+                label += f"\n{arrow}{abs(delta):.0f}%"
+            ax.text(i, bottoms[i], label, ha="center", va="bottom",
+                    color=_FG, fontsize=9)
+
+    ax.set_title(f"Monthly spend — last {len(buckets)} months",
+                 color=_FG, fontsize=14, weight="bold", loc="left", pad=12)
+    ax.set_ylabel("USD per month", color=_MUTED, fontsize=11)
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", facecolor=fig.get_facecolor(),

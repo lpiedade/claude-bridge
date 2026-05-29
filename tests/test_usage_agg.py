@@ -11,6 +11,7 @@ from integrations.claude_usage_agg import (
     FAMILIES,
     _family,
     aggregate_daily,
+    aggregate_monthly,
     aggregate_weekly,
 )
 
@@ -116,6 +117,50 @@ def test_aggregate_weekly_groups_seven_days_per_bucket(tmp_path: Path):
     assert weeks[-2].total == pytest.approx(5.0)
 
 
+def test_aggregate_monthly_groups_by_calendar_month(tmp_path: Path):
+    today = date(2026, 5, 28)
+
+    ts_may = datetime(2026, 5, 10, 10, tzinfo=UTC)
+    ts_apr = datetime(2026, 4, 15, 10, tzinfo=UTC)
+    ts_mar = datetime(2026, 3, 1, 10, tzinfo=UTC)
+
+    _write_session(
+        tmp_path / "proj/abc.jsonl",
+        [
+            _assistant_row("claude-haiku-4-5", {"output_tokens": 2_000_000}, ts_may),
+            _assistant_row("claude-haiku-4-5", {"output_tokens": 1_000_000}, ts_apr),
+            _assistant_row("claude-haiku-4-5", {"output_tokens": 1_000_000}, ts_mar),
+        ],
+    )
+
+    months = aggregate_monthly(months=3, projects_dir=tmp_path, today=today)
+    assert len(months) == 3
+    assert months[0].month_start == date(2026, 3, 1)
+    assert months[1].month_start == date(2026, 4, 1)
+    assert months[2].month_start == date(2026, 5, 1)
+    assert months[0].total == pytest.approx(5.0)
+    assert months[1].total == pytest.approx(5.0)
+    assert months[2].total == pytest.approx(10.0)
+
+
+def test_aggregate_monthly_handles_year_boundary(tmp_path: Path):
+    today = date(2026, 2, 15)
+    ts_dec = datetime(2025, 12, 20, 10, tzinfo=UTC)
+    _write_session(
+        tmp_path / "proj/abc.jsonl",
+        [_assistant_row("claude-haiku-4-5", {"output_tokens": 1_000_000}, ts_dec)],
+    )
+    months = aggregate_monthly(months=3, projects_dir=tmp_path, today=today)
+    assert [m.month_start for m in months] == [
+        date(2025, 12, 1),
+        date(2026, 1, 1),
+        date(2026, 2, 1),
+    ]
+    assert months[0].total == pytest.approx(5.0)
+    assert months[1].total == 0.0
+    assert months[2].total == 0.0
+
+
 def test_aggregate_skips_malformed_lines(tmp_path: Path):
     today = date(2026, 5, 27)
     ts = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
@@ -134,13 +179,16 @@ def test_aggregate_skips_malformed_lines(tmp_path: Path):
 def test_render_renders_empty_window_without_error():
     # No transcripts → buckets are populated with empty dicts. Renderer should
     # still produce a valid PNG (with the "no spend" placeholder).
-    from integrations.claude_usage_agg import DailyBucket, WeeklyBucket
+    from integrations.claude_usage_agg import DailyBucket, MonthlyBucket, WeeklyBucket
     from integrations.claude_usage_agg_render import (
         render_daily_bars_png,
+        render_monthly_bars_png,
         render_weekly_bars_png,
     )
 
     empty_days = [DailyBucket(day=date(2026, 5, 27), cost_by_family={})]
     empty_weeks = [WeeklyBucket(week_start=date(2026, 5, 25), cost_by_family={})]
+    empty_months = [MonthlyBucket(month_start=date(2026, 5, 1), cost_by_family={})]
     assert len(render_daily_bars_png(empty_days)) > 1000
     assert len(render_weekly_bars_png(empty_weeks)) > 1000
+    assert len(render_monthly_bars_png(empty_months)) > 1000

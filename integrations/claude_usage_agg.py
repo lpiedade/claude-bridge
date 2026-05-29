@@ -3,7 +3,7 @@
 Where `claude_usage.parse_session_usage` totals one JSONL, this module walks
 all JSONLs under `CLAUDE_PROJECTS_DIR` and buckets cost by **local date** and
 **model family** (Opus / Sonnet / Haiku / Other). Output is the input for the
-`/usage day` and `/usage week` chart renderers.
+`/usage day`, `/usage week`, and `/usage month` chart renderers.
 """
 from __future__ import annotations
 
@@ -48,6 +48,16 @@ class DailyBucket:
 @dataclass
 class WeeklyBucket:
     week_start: date  # Monday
+    cost_by_family: dict[str, float]
+
+    @property
+    def total(self) -> float:
+        return sum(self.cost_by_family.values())
+
+
+@dataclass
+class MonthlyBucket:
+    month_start: date  # First day of the month
     cost_by_family: dict[str, float]
 
     @property
@@ -113,6 +123,50 @@ def aggregate_weekly(
             for fam, cost in raw.get(d, {}).items():
                 agg[fam] += cost
         out.append(WeeklyBucket(week_start=monday, cost_by_family=dict(agg)))
+    return out
+
+
+def _month_floor(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _add_months(d: date, n: int) -> date:
+    """Return the first-of-month date `n` months after `d` (n may be negative)."""
+    total = d.year * 12 + (d.month - 1) + n
+    year, month = divmod(total, 12)
+    return date(year, month + 1, 1)
+
+
+def aggregate_monthly(
+    months: int = 6,
+    *,
+    projects_dir: Path | None = None,
+    today: date | None = None,
+) -> list[MonthlyBucket]:
+    """Return one bucket per calendar month for the last `months` months (oldest first)."""
+    projects_dir = projects_dir or CLAUDE_PROJECTS_DIR
+    today = today or date.today()
+    this_month = _month_floor(today)
+    starts = [_add_months(this_month, -i) for i in range(months - 1, -1, -1)]
+
+    earliest = starts[0]
+    latest = _add_months(starts[-1], 1) - timedelta(days=1)
+
+    raw: dict[date, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    if projects_dir.exists():
+        for transcript in projects_dir.glob("*/*.jsonl"):
+            _walk_transcript(transcript, earliest, latest, raw)
+
+    out: list[MonthlyBucket] = []
+    for start in starts:
+        end = _add_months(start, 1)
+        agg: dict[str, float] = defaultdict(float)
+        d = start
+        while d < end:
+            for fam, cost in raw.get(d, {}).items():
+                agg[fam] += cost
+            d += timedelta(days=1)
+        out.append(MonthlyBucket(month_start=start, cost_by_family=dict(agg)))
     return out
 
 
